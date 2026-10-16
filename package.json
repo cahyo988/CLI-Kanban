@@ -1,0 +1,13 @@
+{
+  "name": "claude-kanban",
+  "version": "1.0.0",
+  "description": "Live kanban and timeline of every Claude Code session and agent on this machine, per project.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
