@@ -1,17 +1,18 @@
 'use strict';
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const cfg = require('./lib/config');
 const { Collector, projectKeyOf, stripWorktree } = require('./lib/collector');
 const { overview, projectDetail } = require('./lib/model');
-const { Usage } = require('./lib/usage');
+const { Profiles } = require('./lib/profiles');
 const { Runner } = require('./lib/runner');
 
-const collector = new Collector();
-const usage = new Usage();
-const runner = new Runner();
+const profiles = new Profiles();
+const collector = new Collector(() => profiles.roots());
+const runner = new Runner({ profiles });
 collector.start();
 
 // Pages served by this server get the token; other sites can't read it, so they can't make
@@ -85,13 +86,19 @@ function push(reason) {
 collector.on('update', () => push('watch'));
 runner.on('change', (run) => {
   push('runs');
-  // A finished run moved the usage meter; ask again.
-  if (run && run.endedAt) setTimeout(() => usage.refresh(), 1500);
+  // A finished run moved its account's usage meter; ask again.
+  if (run && run.endedAt) setTimeout(() => profiles.refreshUsage(run.profileId || 'default'), 1500);
 });
-usage.on('change', () => push('usage'));
+profiles.on('change', ({ kind }) => {
+  push(kind);
+  if (kind === 'list') {
+    collector.rewatch();
+    collector.refresh('profiles');
+  }
+});
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25000).unref();
-setInterval(() => { if (clients.size) usage.refresh(); }, cfg.USAGE_REFRESH_MS).unref();
-usage.refresh();
+setInterval(() => { if (clients.size) profiles.ensureFresh(5000); }, cfg.USAGE_REFRESH_MS).unref();
+profiles.start();
 
 /* ---------- prompts from the board ---------- */
 function projectPath(snap, key) {
@@ -118,6 +125,7 @@ async function handlePrompt(req, res) {
   const model = String(body.model || '');
   if (!cfg.MODELS.includes(model)) return sendJson(res, 400, { error: 'Model tidak dikenal.' });
 
+  const wantProfile = body.profileId ? String(body.profileId) : null;
   const snap = snapshot();
   if (body.sessionId) {
     const sid = String(body.sessionId);
@@ -131,9 +139,17 @@ async function handlePrompt(req, res) {
     if (snap.live.has(sid) && !runner.activeRun(sid) && !fork) {
       return sendJson(res, 409, { error: 'Sesi ini sedang terbuka di terminal. Kirim sebagai cabang (fork), atau tutup dulu sesinya.', code: 'live' });
     }
+    // A session's transcript lives in its account's folder, so only that account can continue it.
+    const profileId = s.entry.profile || 'default';
+    if (wantProfile && wantProfile !== profileId) {
+      const owner = profiles.get(profileId);
+      return sendJson(res, 400, { error: `Sesi ini milik akun "${owner ? owner.name : profileId}". Lanjutan sesi harus memakai akun yang sama; untuk akun lain, mulai sesi baru.` });
+    }
+    const problem = profiles.problem(profileId);
+    if (problem) return sendJson(res, 400, { error: problem });
     const st = s.entry.state;
     const out = runner.submit({
-      cwd, projectKey: projectKeyOf(cwd), prompt, target: sid, fork, permissionMode, model,
+      cwd, projectKey: projectKeyOf(cwd), prompt, target: sid, fork, permissionMode, model, profileId,
       targetTitle: st.title || st.agentName || 'Sesi ' + sid.slice(0, 8),
     });
     return sendJson(res, 200, { ok: true, queued: out.queued, id: out.queued ? out.item.id : out.run.id });
@@ -142,8 +158,38 @@ async function handlePrompt(req, res) {
   const cwd = projectPath(snap, key);
   if (!cwd) return sendJson(res, 404, { error: 'Project tidak ditemukan.' });
   if (!isDir(cwd)) return sendJson(res, 400, { error: `Folder project tidak ditemukan: ${cwd}` });
-  const out = runner.submit({ cwd, projectKey: key, prompt, target: null, fork: false, permissionMode, model });
+  const profileId = wantProfile || profiles.active;
+  const problem = profiles.problem(profileId);
+  if (problem) return sendJson(res, 400, { error: problem });
+  const out = runner.submit({ cwd, projectKey: key, prompt, target: null, fork: false, permissionMode, model, profileId });
   return sendJson(res, 200, { ok: true, queued: false, id: out.run.id });
+}
+
+/* ---------- account profiles ---------- */
+async function handleProfiles(action, req, res) {
+  const body = await readBody(req);
+  const id = String(body.id || '');
+  switch (action) {
+    case 'add': {
+      const p = profiles.add({ name: body.name, dir: body.dir });
+      return sendJson(res, 200, { ok: true, id: p.id });
+    }
+    case 'remove':
+      profiles.remove(id);
+      return sendJson(res, 200, { ok: true });
+    case 'active':
+      profiles.setActive(id);
+      return sendJson(res, 200, { ok: true });
+    case 'login':
+      profiles.login(id);
+      return sendJson(res, 200, { ok: true });
+    case 'login-input':
+      return profiles.loginInput(id, String(body.text || '')) ? sendJson(res, 200, { ok: true }) : sendJson(res, 409, { error: 'Tidak ada login yang sedang berjalan.' });
+    case 'login-cancel':
+      return profiles.loginCancel(id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 409, { error: 'Tidak ada login yang sedang berjalan.' });
+    default:
+      return sendJson(res, 404, { error: 'not found' });
+  }
 }
 
 /* ---------- routes ---------- */
@@ -164,21 +210,25 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, runner.stop(String(body.id || '')) ? 200 : 404, { ok: true });
       }
       if (url.pathname === '/api/usage/refresh') {
-        usage.refresh();
+        profiles.refreshAll();
         return sendJson(res, 202, { ok: true });
       }
+      if (url.pathname.startsWith('/api/profiles/')) return await handleProfiles(url.pathname.slice('/api/profiles/'.length), req, res);
       return sendJson(res, 404, { error: 'not found' });
     }
     if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' });
     if (url.pathname === '/api/overview') {
-      usage.ensureFresh();
-      return sendJson(res, 200, overview(snapshot(), { usage: usage.snapshot() }));
+      profiles.ensureFresh();
+      const act = profiles.activeState();
+      return sendJson(res, 200, overview(snapshot(), { usage: act.usage.snapshot(), account: act.account.snapshot(), profiles: profiles.snapshot(), home: os.homedir() }));
     }
     if (url.pathname === '/api/project') {
       const detail = projectDetail(snapshot(), url.searchParams.get('key') || '');
       return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: 'project not found' });
     }
-    if (url.pathname === '/api/usage') return sendJson(res, 200, usage.snapshot());
+    if (url.pathname === '/api/usage') return sendJson(res, 200, profiles.activeState().usage.snapshot());
+    if (url.pathname === '/api/account') return sendJson(res, 200, profiles.activeState().account.snapshot());
+    if (url.pathname === '/api/profiles') return sendJson(res, 200, { active: profiles.active, profiles: profiles.snapshot() });
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
       res.write(`event: hello\ndata: ${JSON.stringify({ version: pushVersion })}\n\n`);
@@ -188,7 +238,7 @@ const server = http.createServer(async (req, res) => {
     }
     return serveStatic(res, url.pathname);
   } catch (e) {
-    console.error(e);
+    if (!e.status) console.error(e);
     return sendJson(res, e.status || 500, { error: e.message });
   }
 });

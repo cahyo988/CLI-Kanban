@@ -41,6 +41,55 @@ Claude Code CLI sendiri lewat control request `get_usage`, sama dengan data yang
 `/usage`. Kanban tidak membaca token login dan tidak menjalankan model untuk ini. Data
 disegarkan tiap 90 detik selama dashboard terbuka, dan setiap kali prompt dari kanban selesai.
 
+### Akun Claude (bisa lebih dari satu)
+
+Sidebar menampilkan akun yang sedang aktif: email, organisasi, dan paket. Klik untuk membuka
+**Akun Claude**, tempat kamu bisa menambah akun, login, mengganti akun aktif, dan menghapus akun
+dari kanban. Tombol **Akun** di panel pemakaian membuka tempat yang sama.
+
+Setiap akun punya **folder Claude sendiri** (`CLAUDE_CONFIG_DIR`), jadi semua akun tetap login
+bersamaan dan tidak saling menimpa:
+
+| | Akun utama | Akun tambahan |
+|---|---|---|
+| Folder | `~/.claude` (bawaan Claude Code) | misalnya `~/.claude-pribadi`, dibuat otomatis |
+| Login | seperti biasa | tombol **Login** di kartunya (membuka claude.ai di browser PC ini), atau di terminal: `$env:CLAUDE_CONFIG_DIR="…"; claude auth login` |
+| Terminal | `claude` | tombol **Salin perintah terminal**: `$env:CLAUDE_CONFIG_DIR="…"; claude` |
+
+- **Akun aktif** dipakai untuk prompt baru dari kanban, dan limitnya tampil di sidebar. Di
+  composer kamu juga bisa memilih akun lain untuk satu prompt.
+- **Lanjutan sesi** selalu memakai akun pemilik sesi itu, karena transcript-nya ada di folder
+  akun tersebut. Untuk pindah akun, mulai sesi baru.
+- Panel pemakaian menampilkan limit **setiap akun** berdampingan. Akun aktif diperbarui tiap 90
+  detik, akun lain tiap 5 menit. Token juga dihitung per akun.
+- Sesi dari semua folder akun muncul di kanban. Kalau ada lebih dari satu akun, kartu sesi diberi
+  tag nama akunnya.
+- Kalau login meminta kode dari browser, tempel kodenya di kartu akun. Output CLI juga bisa
+  dilihat di sana.
+- **Hapus** hanya melepas akun dari kanban. Folder, login, dan riwayatnya tetap ada di disk.
+- Mengganti akun aktif di kanban tidak mengubah terminal. `claude` di terminal tetap memakai
+  akun utama, kecuali dibuka dengan perintah akun lain.
+
+Data akun diambil dari `claude auth status --json` milik tiap folder, jadi kanban tidak membaca
+file kredensial. Daftar akun disimpan di `data/profiles.json`.
+
+### Token terpakai
+
+Panel **Token terpakai** di halaman utama menghitung token dari transcript semua sesi dan
+agent di PC ini:
+
+- total **hari ini · 7 hari · 30 hari · semua**, dengan rincian output dan input baru
+- grafik token per hari (14 hari), komposisi (input baru, output, tulis cache, baca cache),
+  dan pembagian per model
+- token per project (kartu project dan header project), per sesi (tab **Sesi**, termasuk
+  agent-nya), per request (termasuk agent dari request itu), per agent, dan per sesi live
+
+Setiap respons API ditulis di transcript sebagai beberapa baris dengan usage yang sama, jadi
+kanban menghitung tiap respons sekali saja (berdasarkan id pesan). Panggilan internal CLI yang
+tidak masuk transcript (misalnya compact dan judul otomatis) tidak ikut terhitung, sehingga
+angkanya bisa sedikit di bawah hitungan CLI. *Baca cache* adalah konteks yang dibaca ulang tiap
+giliran, jadi biasanya merupakan bagian terbesar.
+
 ### Kirim prompt dari kanban
 
 Tombol **Prompt baru** (shortcut `N`), **Kirim prompt** di kartu sesi live, dan **Kirim
@@ -101,6 +150,9 @@ Data dibaca **read-only** dari `~/.claude`:
 | `projects/*/<session>.jsonl` | transcript: prompt, task, agent, aktivitas |
 | `projects/*/<session>/subagents/*` | transcript dan metadata subagent |
 | `jobs/*/state.json` | sesi background |
+| `claude auth status --json` | akun yang login di tiap folder akun (email, organisasi, paket) |
+
+Semua sumber di atas dibaca dari folder setiap akun yang terdaftar (`~/.claude` dan folder akun tambahan).
 
 Transcript dibaca incremental per byte offset dan disimpan di `data/cache.json`, jadi file
 ratusan MB hanya dibaca penuh sekali. Perubahan dideteksi lewat `fs.watch` dan polling 5 detik,

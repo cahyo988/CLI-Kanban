@@ -41,6 +41,10 @@ const I = {
   activity: '<path d="M3 12h3.5l2.5-6.5 4.5 13 2.5-6.5H21"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
   arrowL: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  users: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.2a6.5 6.5 0 0 1 3.5 5.3"/>',
+  swap: '<path d="M7 7.5h12.5l-3.5-3.5M17 16.5H4.5L8 20"/>',
+  coins: '<ellipse cx="12" cy="6.5" rx="7" ry="3"/><path d="M5 6.5v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5M5 11.5v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.8l2 2h7.2a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
 };
 const icon = (name, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[name] || I.circle}</svg>`;
@@ -124,6 +128,8 @@ const S = {
   prevActive: null,
   prevRuns: null,
   composer: null,
+  accounts: null,
+  prevProfiles: null,
   toasts: [],
   connected: false,
   lastUpdate: 0,
@@ -379,12 +385,14 @@ async function load() {
     const [ov, pr] = await Promise.all(reqs);
     if (seq !== loadSeq) return;
     detectChanges(ov);
+    detectProfileChanges(ov);
     S.overview = ov;
     S.project = S.route.view === 'project' ? pr : null;
     S.lastUpdate = Date.now();
     render();
     // ?compose opens the prompt box straight away (handy as a bookmark).
     if (/[?&]compose\b/.test(location.search) && !S.composeOpened) { S.composeOpened = true; openComposer(); }
+    if (/[?&]accounts\b/.test(location.search) && !S.accountsOpened) { S.accountsOpened = true; openAccounts(); }
     if (S.pendingCard && S.project) {
       const id = S.pendingCard;
       S.pendingCard = null;
@@ -610,6 +618,7 @@ function sidebarHtml() {
     ${ov ? '' : `<div class="skel" style="height:34px;margin:14px 6px"></div><div class="skel" style="height:34px;margin:8px 6px"></div><div class="skel" style="height:34px;margin:8px 6px"></div>`}
   </div>
   <div class="sb-foot">
+    ${accountHtml()}
     ${usageMini()}
     <div class="live-status ${S.connected ? 'ok' : 'bad'}"><span class="dot"></span>${S.connected ? 'Live: memantau PC ini' : 'Terputus, menyambung ulang…'}</div>
     <div class="sb-controls">
@@ -650,9 +659,7 @@ function resetLabel(ts) {
     : new Date(ts).toLocaleString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   return `reset ${when}${ts > now ? ` · ${dur(ts - now)} lagi` : ''}`;
 }
-function usageHtml() {
-  const u = S.overview && S.overview.usage;
-  if (!u) return '';
+function limitsBody(u) {
   const d = u.data;
   let body;
   if (!d && u.error) body = `<div class="usage-msg tone-red">${icon('alert', 'ic-sm')}<span>Pemakaian belum bisa dibaca: ${esc(u.error)}</span></div>`;
@@ -668,16 +675,47 @@ function usageHtml() {
       <div class="limit-sub"><span>${l.kind === 'session' ? 'jendela 5 jam' : '7 hari'}</span><span>${esc(resetLabel(l.resetsAt))}</span></div>
     </div>`;
   }).join('')}</div>`;
-  const fetched = u.fetchedAt ? `diperbarui ${clock(u.fetchedAt)}` : 'memuat…';
+  return body;
+}
+// One account's limits inside the usage card, when the kanban knows several accounts.
+function profileUsage(p) {
+  const d = p.account && p.account.data;
+  const face = loggedIn(p) ? d.email || d.orgName || p.name : p.name;
+  let body;
+  if (loggedOut(p)) body = `<div class="usage-msg tone-amber">${icon('user', 'ic-sm')}<span>Akun ini belum login.</span><button class="btn sm" data-act="accounts">Login</button></div>`;
+  else if (!d && !(p.account && p.account.error)) body = `<div class="usage-grid"><div class="skel" style="height:62px"></div></div>`;
+  else body = limitsBody(p.usage || {});
+  return `<div class="pu${p.active ? ' active' : ''}" data-key="pu:${esc(p.id)}">
+    <div class="pu-head">
+      <span class="avatar sm" style="--pc:${hashColor(loggedIn(p) ? face : 'prof:' + p.id)}">${esc(face.charAt(0).toUpperCase())}</span>
+      <b>${esc(p.name)}</b>
+      ${loggedIn(p) && d.email ? `<span class="pu-email">${esc(d.email)}${d.orgName ? ' · ' + esc(d.orgName) : ''}</span>` : ''}
+      ${loggedIn(p) && d.plan ? `<span class="plan-badge">${esc(planLabel(d.plan))}</span>` : ''}
+      ${p.active ? '<span class="acct-tag">aktif</span>' : loggedIn(p) ? `<button class="btn ghost sm pu-switch" data-act="acc-activate" data-v="${esc(p.id)}">${icon('swap', 'ic-sm')}Jadikan aktif</button>` : ''}
+    </div>
+    ${body}
+  </div>`;
+}
+function usageHtml() {
+  const u = S.overview && S.overview.usage;
+  if (!u) return '';
+  const d = u.data;
+  const list = profiles();
+  const multi = list.length > 1;
+  const loading = multi ? list.some((p) => p.usage && p.usage.loading) : u.loading;
+  const fetchedAt = multi ? Math.max(0, ...list.map((p) => (p.usage && p.usage.fetchedAt) || 0)) : u.fetchedAt;
+  const fetched = fetchedAt ? `diperbarui ${clock(fetchedAt)}` : 'memuat…';
   return `<section class="usage-card" data-key="usage">
     <header class="usage-head">
       <span class="usage-ic">${icon('activity', 'ic-sm')}</span>
       <h2 class="section-title">Pemakaian Claude</h2>
-      ${d && d.plan ? `<span class="plan-badge">${esc(d.plan)}</span>` : ''}
-      <span class="usage-meta">${fetched}${u.data && u.error ? ' · gagal menyegarkan' : ''}</span>
-      <button class="btn ghost sm icon-btn" data-act="usage-refresh" title="Segarkan" aria-label="Segarkan pemakaian">${icon('loader', 'ic-sm' + (u.loading ? ' spin' : ''))}</button>
+      ${multi ? `<span class="usage-acct">${list.length} akun</span>` : accountInline()}
+      ${!multi && d && d.plan ? `<span class="plan-badge">${esc(planLabel(d.plan))}</span>` : ''}
+      <span class="usage-meta">${fetched}${!multi && u.data && u.error ? ' · gagal menyegarkan' : ''}</span>
+      <button class="btn ghost sm" data-act="accounts" title="Kelola dan ganti akun Claude">${icon('users', 'ic-sm')}<span class="hide-sm">Akun</span></button>
+      <button class="btn ghost sm icon-btn" data-act="usage-refresh" title="Segarkan" aria-label="Segarkan pemakaian">${icon('loader', 'ic-sm' + (loading ? ' spin' : ''))}</button>
     </header>
-    ${body}
+    ${multi ? `<div class="pu-list">${list.map(profileUsage).join('')}</div>` : limitsBody(u)}
   </section>`;
 }
 // The session window, compact, for the sidebar.
@@ -690,6 +728,283 @@ function usageMini() {
     <span class="um-top"><span>${esc(l.kind === 'session' ? 'Limit sesi Claude' : limitLabel(l))}</span><b>${pct}%</b></span>
     <span class="meter"><i style="width:${Math.min(100, pct)}%"></i></span>
   </a>`;
+}
+
+/* ---------- account (claude auth status) ---------- */
+const PLANS = { team: 'Team', max: 'Max', pro: 'Pro', enterprise: 'Enterprise', free: 'Free' };
+const planLabel = (p) => (p ? PLANS[p] || p.charAt(0).toUpperCase() + p.slice(1) : '');
+const AUTH = { 'claude.ai': 'Login lewat claude.ai', console: 'Anthropic Console (API)', apiKey: 'API key', api_key: 'API key' };
+function accountTip(d) {
+  return [d.email || 'Akun Claude', d.orgName ? `Organisasi: ${d.orgName}` : '', d.plan ? `Paket: ${planLabel(d.plan)}` : '', AUTH[d.authMethod] || d.authMethod || ''].filter(Boolean).join('\n');
+}
+function accountHtml() {
+  const a = S.overview && S.overview.account;
+  if (!a) return '';
+  const d = a.data;
+  const list = profiles();
+  const prof = list.find((p) => p.active);
+  const more = list.length > 1 ? `<span class="acct-count" title="${list.length} akun di kanban">${list.length}</span>` : '';
+  const open = (cls, tip, inner) => `<button class="acct${cls}" data-key="acct" data-act="accounts" data-tip="${esc(tip)}">${inner}${more}${icon('swap', 'ic-sm acct-go')}</button>`;
+  if (!d && a.error) return open(' tone-red', 'Akun tidak terbaca\n' + a.error, `<span class="acct-ic">${icon('alert', 'ic-sm')}</span><span class="acct-text"><span class="acct-name">Akun tidak terbaca</span><span class="acct-sub">claude auth status gagal</span></span>`);
+  if (!d) return `<div class="skel" style="height:44px"></div>`;
+  if (!d.loggedIn) return open(' tone-amber', 'Akun aktif belum login\nKlik untuk login atau ganti akun', `<span class="acct-ic">${icon('user', 'ic-sm')}</span><span class="acct-text"><span class="acct-name">Belum login</span><span class="acct-sub">${esc(prof ? prof.name : 'Akun Claude')} · klik untuk login</span></span>`);
+  const name = d.email || d.orgName || 'Akun Claude';
+  const sub = [list.length > 1 && prof ? prof.name : null, d.orgName, planLabel(d.plan)].filter(Boolean).join(' · ') || AUTH[d.authMethod] || '';
+  return open('', accountTip(d) + '\nKlik untuk kelola atau ganti akun', `<span class="avatar sm" style="--pc:${hashColor(name)}">${esc(name.charAt(0).toUpperCase())}</span>
+    <span class="acct-text"><span class="acct-name">${esc(name)}</span><span class="acct-sub">${esc(sub)}</span></span>`);
+}
+
+/* ---------- account profiles (one Claude config folder each) ---------- */
+const profiles = () => (S.overview && S.overview.profiles) || [];
+const profileOf = (id) => profiles().find((p) => p.id === (id || 'default')) || null;
+const activeProfile = () => profiles().find((p) => p.active) || null;
+const loggedIn = (p) => !!(p && p.account && p.account.data && p.account.data.loggedIn);
+const loggedOut = (p) => !!(p && p.account && p.account.data && !p.account.data.loggedIn);
+// Shown only when there is more than one account to tell apart.
+function profTag(id) {
+  if (profiles().length < 2) return '';
+  const p = profileOf(id);
+  return p ? `<span class="prof-tag" style="--pc:${hashColor('prof:' + p.id)}" data-tip="${esc('Akun ' + p.name + (loggedIn(p) && p.account.data.email ? '\n' + p.account.data.email : ''))}"><i></i>${esc(p.name)}</span>` : '';
+}
+const termCmd = (p, extra = '') => (p.isDefault ? 'claude' + extra : `$env:CLAUDE_CONFIG_DIR="${p.dir}"; claude${extra}`);
+function suggestDir(name) {
+  const home = (S.overview && S.overview.home) || '';
+  const sep = home.includes('\\') ? '\\' : '/';
+  const slug = String(name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'akun2';
+  return home ? `${home.replace(/[\\/]+$/, '')}${sep}.claude-${slug}` : '';
+}
+function limitShort(l) {
+  if (l.kind === 'session') return 'Sesi 5 jam';
+  if (l.model) return 'Minggu · ' + l.model;
+  return l.group === 'weekly' || l.kind === 'weekly' ? 'Mingguan' : l.kind.replace(/_/g, ' ');
+}
+function miniLimits(limits) {
+  return `<div class="acc-limits">${limits.map((l, i) => {
+    const pct = Math.max(0, Math.min(100, Math.round(l.percent || 0)));
+    return `<div class="acc-limit tone-${limitTone(l)}" data-key="al:${i}" data-tip="${esc(limitLabel(l) + '\n' + resetLabel(l.resetsAt))}"><span class="al-top"><span>${esc(limitShort(l))}</span><b>${pct}%</b></span><span class="meter"><i style="width:${pct}%"></i></span></div>`;
+  }).join('')}</div>`;
+}
+
+function openAccounts() {
+  if (S.drawer) closeDrawer();
+  S.composer = null;
+  S.accounts = { form: null, codes: {} };
+  renderComposer();
+}
+function closeAccounts() {
+  S.accounts = null;
+  renderComposer();
+}
+
+function loginPanel(p) {
+  const L = p.login;
+  const id = esc(p.id);
+  if (L && L.running) {
+    const code = S.accounts.codes[p.id] || '';
+    return `<div class="acc-login tone-blue" data-key="login:${id}">
+      <div class="al-head">${icon('loader', 'ic-sm spin')}<span>Menunggu login di browser…</span><button class="btn ghost sm" data-act="acc-login-cancel" data-v="${id}">Batal</button></div>
+      <p class="al-hint">Claude CLI membuka halaman login claude.ai di browser PC ini. Selesaikan login di sana${L.url ? ', atau buka link ini' : ''}. Akun ini otomatis terbaca begitu login selesai.</p>
+      ${L.url ? `<a class="al-url mono" href="${esc(L.url)}" target="_blank" rel="noopener noreferrer">${icon('globe', 'ic-xs')}<span>${esc(trim(L.url, 110))}</span></a>` : ''}
+      <div class="al-code"><span class="field">${icon('pencil', 'ic-sm')}<input type="text" data-act="acc-code" data-v="${id}" value="${esc(code)}" placeholder="Tempel kode dari browser, bila diminta" autocomplete="off" spellcheck="false"></span><button class="btn sm" data-act="acc-code-send" data-v="${id}"${code.trim() ? '' : ' disabled'}>Kirim kode</button></div>
+      ${L.lines.length ? `<details class="fold" data-key="al-log:${id}"><summary>${icon('chevR', 'ic-xs')}Output Claude CLI</summary><pre class="al-log">${esc(L.lines.join('\n'))}</pre></details>` : ''}
+    </div>`;
+  }
+  if (loggedIn(p)) {
+    return L && L.ok && Date.now() - L.endedAt < 120000 ? `<div class="acc-login tone-green" data-key="login:${id}"><div class="al-head">${icon('checkc', 'ic-sm')}<span>Login berhasil.</span></div></div>` : '';
+  }
+  if (!loggedOut(p)) return '';
+  return `<div class="acc-login tone-amber" data-key="login:${id}">
+    ${L && L.error ? `<div class="cmp-error">${icon('alert', 'ic-sm')}<span>${esc(L.error)}</span></div>` : ''}
+    <div class="al-head">${icon('user', 'ic-sm')}<span>Akun ini belum login.</span><button class="btn sm primary" data-act="acc-login" data-v="${id}">${icon('play', 'ic-sm')}Login</button></div>
+    <p class="al-hint">Login membuka claude.ai di browser PC ini. Dari perangkat lain, kamu juga bisa login lewat terminal di PC: <code>${esc(termCmd(p, ' auth login'))}</code></p>
+  </div>`;
+}
+
+function accountCard(p) {
+  const d = p.account && p.account.data;
+  const ok = loggedIn(p);
+  const status = ok
+    ? [d.orgName, planLabel(d.plan)].filter(Boolean).join(' · ')
+    : loggedOut(p) ? 'Belum login' : p.account && p.account.error ? 'Status login tidak terbaca' : 'Memeriksa login…';
+  const face = ok ? d.email || d.orgName || p.name : p.name;
+  const u = p.usage && p.usage.data;
+  const tok = p.tokens && tokSum(p.tokens.all)
+    ? `<span class="acc-tok" data-tip="${esc(tokTip(p.tokens.all, 'Token akun ini'))}">${icon('coins', 'ic-xs')}${fmtTok(tokSum(p.tokens.today))} hari ini · ${fmtTok(tokSum(p.tokens.all))} total</span>`
+    : '<span class="acc-tok muted">Belum ada token tercatat</span>';
+  const cmd = termCmd(p);
+  return `<article class="acc-card${p.active ? ' active' : ''}" data-key="acc:${esc(p.id)}">
+    <div class="acc-top">
+      <span class="avatar" style="--pc:${hashColor(ok ? face : 'prof:' + p.id)}">${esc(face.charAt(0).toUpperCase())}</span>
+      <div class="acc-titles">
+        <div class="acc-name"><b>${esc(p.name)}</b>${p.isDefault ? '<span class="type-tag">folder bawaan</span>' : ''}${p.active ? '<span class="acct-tag">aktif</span>' : ''}</div>
+        <div class="acc-email">${ok && d.email ? `<span>${esc(d.email)}</span>` : ''}<span class="muted">${esc(status)}</span></div>
+        <div class="acc-dir mono" data-tip="${esc('Folder akun ini\n' + p.dir)}">${esc(p.dir)}</div>
+      </div>
+      ${p.active ? '' : `<button class="btn sm${ok ? ' primary' : ''}" data-act="acc-activate" data-v="${esc(p.id)}"${ok ? '' : ' disabled'} title="${ok ? 'Pakai akun ini untuk prompt baru dari kanban' : 'Login dulu'}">${icon('swap', 'ic-sm')}Jadikan aktif</button>`}
+    </div>
+    ${ok && u && u.limits && u.limits.length ? miniLimits(u.limits) : ok && p.usage && p.usage.error && !u ? `<div class="usage-msg tone-red">${icon('alert', 'ic-sm')}<span>Limit belum terbaca: ${esc(p.usage.error)}</span></div>` : ''}
+    ${loginPanel(p)}
+    <div class="acc-foot">${tok}
+      ${p.isDefault ? '' : `<button class="btn ghost sm" data-act="copy" data-v="${esc(cmd)}" data-tip="${esc('Perintah PowerShell untuk membuka Claude dengan akun ini\n' + cmd)}">${icon('terminal', 'ic-sm')}Salin perintah terminal</button>`}
+      ${p.isDefault ? '' : `<button class="btn ghost sm danger" data-act="acc-remove" data-v="${esc(p.id)}">${icon('x', 'ic-sm')}Hapus</button>`}
+    </div>
+  </article>`;
+}
+
+function accountForm() {
+  const f = S.accounts.form;
+  return `<div class="acc-form" data-key="acc-form">
+    <div class="acc-form-title">${icon('plus', 'ic-sm')}Akun baru</div>
+    <div class="cmp-row">
+      <label class="cmp-field"><span>Nama</span><span class="field">${icon('user', 'ic-sm')}<input type="text" data-act="acc-name" value="${esc(f.name)}" placeholder="mis. Pribadi" maxlength="40" autocomplete="off"></span></label>
+      <label class="cmp-field acc-dir-field"><span>Folder</span><span class="field">${icon('folder', 'ic-sm')}<input type="text" data-act="acc-dir" value="${esc(f.dir)}" spellcheck="false" autocomplete="off"></span></label>
+    </div>
+    <p class="cmp-hint">Folder dibuat kalau belum ada. Login, setelan, dan riwayat akun ini tersimpan di sana, terpisah dari akun lain. Setelah ditambahkan, klik <b>Login</b>.</p>
+    ${f.error ? `<div class="cmp-error">${icon('alert', 'ic-sm')}<span>${esc(f.error)}</span></div>` : ''}
+    <div class="acc-form-foot"><button class="btn" data-act="acc-add-cancel">Batal</button><button class="btn primary" data-act="acc-add-save"${f.busy || !f.name.trim() || !f.dir.trim() ? ' disabled' : ''}>${icon(f.busy ? 'loader' : 'plus', 'ic-sm' + (f.busy ? ' spin' : ''))}Tambah akun</button></div>
+  </div>`;
+}
+
+function renderAccounts() {
+  const modal = $('#modal');
+  const list = profiles();
+  patch(modal, `
+    <div class="modal-backdrop" data-act="accounts-close"></div>
+    <section class="modal-panel accounts" role="dialog" aria-modal="true" aria-labelledby="acc-title">
+      <header class="cmp-head">
+        <span class="cmp-ic">${icon('users', 'ic-lg')}</span>
+        <div class="cmp-titles"><h2 id="acc-title">Akun Claude</h2><p>Setiap akun punya folder Claude sendiri, jadi semuanya tetap login bersamaan.</p></div>
+        <button class="btn ghost icon-btn" data-act="accounts-close" aria-label="Tutup">${icon('x', 'ic-sm')}</button>
+      </header>
+      <div class="cmp-body">
+        <div class="acc-list">${list.map(accountCard).join('')}</div>
+        ${S.accounts.form ? accountForm() : `<button class="btn acc-add" data-key="acc-add" data-act="acc-add">${icon('plus', 'ic-sm')}Tambah akun</button>`}
+        <p class="cmp-hint acc-note">${icon('swap', 'ic-xs')}<span>Akun <b>aktif</b> dipakai untuk prompt baru dari kanban, dan limitnya tampil di sidebar. Lanjutan sesi selalu memakai akun sesi itu. Terminal tetap memakai akun utama, kecuali kamu membukanya dengan <i>Salin perintah terminal</i>.</span></p>
+      </div>
+    </section>`);
+  if (!modal.classList.contains('open')) { modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false'); }
+}
+
+async function addAccount() {
+  const f = S.accounts && S.accounts.form;
+  if (!f || f.busy) return;
+  f.busy = true;
+  f.error = null;
+  renderComposer();
+  const r = await api('/api/profiles/add', { name: f.name.trim(), dir: f.dir.trim() });
+  if (!S.accounts || S.accounts.form !== f) return;
+  f.busy = false;
+  if (!r.ok) {
+    f.error = r.error || 'Akun gagal ditambahkan.';
+    renderComposer();
+    return;
+  }
+  S.accounts.form = null;
+  toast({ tone: 'green', icon: 'users', title: `Akun "${f.name.trim()}" ditambahkan`, body: 'Klik Login di kartunya untuk masuk ke akun Claude.', ttl: 5000 });
+  scheduleReload();
+}
+async function sendLoginCode(id) {
+  const code = (S.accounts && S.accounts.codes[id]) || '';
+  if (!code.trim()) return;
+  const r = await api('/api/profiles/login-input', { id, text: code });
+  if (r.ok && S.accounts) S.accounts.codes[id] = '';
+  if (!r.ok) toast({ tone: 'red', icon: 'alert', title: 'Kode tidak terkirim', body: r.error });
+  scheduleReload();
+}
+
+// Toasts for logins that finish while the page is open.
+function detectProfileChanges(ov) {
+  const cur = new Map((ov.profiles || []).map((p) => [p.id, { running: !!(p.login && p.login.running), name: p.name, login: p.login, account: p.account }]));
+  const prev = S.prevProfiles;
+  S.prevProfiles = cur;
+  if (!prev) return;
+  for (const [id, p] of cur) {
+    const was = prev.get(id);
+    if (!was || !was.running || p.running) continue;
+    if (p.login && p.login.ok) toast({ tone: 'green', icon: 'checkc', title: `Akun "${p.name}" berhasil login`, body: (p.account && p.account.data && p.account.data.email) || '', ttl: 6000 });
+    else toast({ tone: 'red', icon: 'alert', title: `Login akun "${p.name}" gagal`, body: (p.login && p.login.error) || '' });
+  }
+}
+function accountInline() {
+  const d = S.overview && S.overview.account && S.overview.account.data;
+  if (!d || !d.loggedIn || !d.email) return '';
+  return `<span class="usage-acct" data-tip="${esc(accountTip(d))}">${icon('user', 'ic-xs')}<span>${esc(d.email)}${d.orgName ? ` · ${esc(d.orgName)}` : ''}</span></span>`;
+}
+
+/* ---------- tokens (from transcripts) ---------- */
+// Counts arrive as [input, output, cache write, cache read].
+const TOK_PARTS = ['Input baru', 'Output', 'Tulis cache', 'Baca cache'];
+const tokSum = (v) => (v ? v[0] + v[1] + v[2] + v[3] : 0);
+const num = (n) => Math.round(n || 0).toLocaleString('id-ID');
+// Indonesian short scale: rb (ribu), jt (juta), M (miliar).
+function fmtTok(n) {
+  n = n || 0;
+  const f = (x, unit) => `${x.toLocaleString('id-ID', { maximumFractionDigits: x < 100 ? 1 : 0 })}\u00a0${unit}`;
+  if (n >= 1e9) return f(n / 1e9, 'M');
+  if (n >= 1e6) return f(n / 1e6, 'jt');
+  if (n >= 1e3) return f(n / 1e3, 'rb');
+  return num(n);
+}
+function tokTip(v, head = 'Token') {
+  return [`${head}: ${num(tokSum(v))} token`, ...TOK_PARTS.map((l, i) => `${l}: ${num(v[i])}`)].join('\n');
+}
+// claude-opus-4-7 → Opus 4.7; anything else keeps its id minus the claude- prefix.
+function modelShort(m) {
+  const x = String(m || '?').match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
+  if (!x) return String(m || '?').replace(/^claude-/, '');
+  return `${x[1].charAt(0).toUpperCase() + x[1].slice(1)} ${x[2]}${x[3] ? '.' + x[3] : ''}`;
+}
+
+function tokenBars(days) {
+  const totals = days.tok.map(tokSum);
+  const max = Math.max(1, ...totals);
+  const n = totals.length;
+  const bars = totals.map((t, i) => {
+    const day = addDays(days.start, i);
+    const label = new Date(day).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' });
+    const cls = ['tb', t ? '' : 'zero', i === n - 1 ? 'today' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-key="tb:${day}" data-tip="${esc(t ? tokTip(days.tok[i], label) : label + '\nTidak ada pemakaian')}"><i style="height:${t ? Math.max(3, (t / max) * 100).toFixed(1) : 0}%"></i></div>`;
+  }).join('');
+  const peak = totals.indexOf(Math.max(...totals));
+  const peakLabel = totals[peak] ? `puncak ${fmtTok(totals[peak])} · ${new Date(addDays(days.start, peak)).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}` : 'belum ada pemakaian';
+  return `<div class="tok-bars" role="img" aria-label="Token per hari, ${n} hari terakhir, ${esc(peakLabel)}">${bars}</div>
+    <div class="spark-cap"><span>${new Date(days.start).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span><span>${esc(peakLabel)}</span><span>hari ini</span></div>`;
+}
+function tokRows(rows, total) {
+  return `<div class="tok-rows">${rows.map((r) => {
+    const pct = total ? (tokSum(r.tok) / total) * 100 : 0;
+    const pctLabel = pct >= 10 || pct === 0 ? Math.round(pct) + '%' : pct >= 1 ? pct.toFixed(1).replace('.', ',') + '%' : '<1%';
+    return `<div class="tok-row" data-key="tr:${esc(r.key)}" data-tip="${esc(tokTip(r.tok, r.label))}">
+      <span class="tr-label${r.mono ? ' mono' : ''}">${esc(r.label)}</span><span class="tr-val">${fmtTok(tokSum(r.tok))}</span><span class="tr-pct">${pctLabel}</span>
+      <span class="tr-bar"><i style="width:${Math.max(pct ? 1 : 0, pct).toFixed(1)}%"></i></span>
+    </div>`;
+  }).join('')}</div>`;
+}
+function tokensHtml(t, { title = 'Token terpakai', sub = 'semua sesi dan agent di PC ini', key = 'tokens' } = {}) {
+  if (!t) return '';
+  const total = tokSum(t.all);
+  const head = `<header class="usage-head"><span class="usage-ic">${icon('coins', 'ic-sm')}</span><h2 class="section-title">${title}</h2><span class="usage-meta">${esc(sub)}</span></header>`;
+  if (!total) return `<section class="usage-card tok-card" data-key="${key}">${head}<div class="usage-msg tone-neutral">${icon('coins', 'ic-sm')}<span>Belum ada pemakaian token yang tercatat.</span></div></section>`;
+  const tiles = [['today', 'Hari ini', t.today], ['d7', '7 hari', t.d7], ['d30', '30 hari', t.d30], ['all', 'Semua', t.all]];
+  // One row per kind of token, in fixed order; the bar length carries the share, so one hue is enough.
+  const parts = TOK_PARTS.map((label, i) => ({ key: 'p' + i, label, tok: [0, 0, 0, 0].map((_, j) => (j === i ? t.all[i] : 0)) }));
+  let models = (t.models || []).map((m) => ({ key: m.model, label: modelShort(m.model), tok: m.tok }));
+  if (models.length > 5) {
+    const rest = models.slice(4).reduce((acc, m) => acc.map((x, i) => x + m.tok[i]), [0, 0, 0, 0]);
+    models = [...models.slice(0, 4), { key: 'other', label: `${models.length - 4} model lain`, tok: rest }];
+  }
+  return `<section class="usage-card tok-card" data-key="${key}">
+    ${head}
+    <div class="tok-tiles">${tiles.map(([k, l, v]) => `<div class="tok-tile" data-key="tt:${k}" data-tip="${esc(tokTip(v, l))}">
+      <span class="tt-label">${l}</span><b>${fmtTok(tokSum(v))}</b><span class="tt-sub">output ${fmtTok(v[1])} · input baru ${fmtTok(v[0])}</span>
+    </div>`).join('')}</div>
+    <div class="tok-lower">
+      <div class="tok-panel tp-chart"><div class="tp-head"><span>Per hari</span><span>${t.days.tok.length} hari terakhir</span></div>${tokenBars(t.days)}</div>
+      <div class="tok-panel"><div class="tp-head"><span>Komposisi</span><span>semua waktu</span></div>${tokRows(parts, total)}</div>
+      <div class="tok-panel"><div class="tp-head"><span>Per model</span><span>semua waktu</span></div>${tokRows(models, total)}</div>
+    </div>
+    <p class="tok-note">${icon('alert', 'ic-xs')}<span><b>Baca cache</b> adalah konteks percakapan yang dibaca ulang di setiap giliran, jadi angkanya paling besar. Angka dihitung dari transcript. Panggilan internal CLI (misalnya compact dan judul otomatis) tidak tercatat di sana, jadi angkanya bisa sedikit di bawah hitungan CLI.</span></p>
+  </section>`;
 }
 
 /* ---------- overview ---------- */
@@ -705,6 +1020,7 @@ function overviewHtml() {
     <div class="head-right">${livePill()}<button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
   </header>
   ${usageHtml()}
+  ${tokensHtml(ov.tokens)}
   <section class="kpis">
     ${kpi('zap', k.working, 'Sesi bekerja', 'green')}
     ${kpi('user', k.waiting, 'Menunggu kamu', 'amber', k.waiting > 0)}
@@ -748,7 +1064,7 @@ function nowCard(a, compact) {
     <header class="now-head">
       ${compact ? '' : `<span class="avatar" style="--pc:${hashColor(a.projectKey)}">${esc(initials(a.projectName))}</span>`}
       <div class="now-titles">
-        <div class="now-proj">${esc(compact ? 'Sesi live' : a.projectName)}</div>
+        <div class="now-proj">${esc(compact ? 'Sesi live' : a.projectName)}${profTag(a.profile)}</div>
         <div class="now-title">${esc(a.title)}</div>
       </div>
       <div class="now-status">${pill(a.status, a.starting ? 'Memulai…' : needsLabel(a.needs))}<span class="now-since">${since}</span></div>
@@ -761,7 +1077,7 @@ function nowCard(a, compact) {
     ${a.job && a.job.detail ? `<div class="act-row"><span class="act-ic">${icon('layers', 'ic-sm')}</span><span class="act-text">${esc(a.job.detail)}</span></div>` : ''}
     ${a.checklist.length ? `<div class="now-sec"><div class="now-sec-head"><span>Progress</span><span class="num">${a.progress.done}/${a.progress.total} · ${Math.round((a.progress.done / a.progress.total) * 100)}%</span></div>${progressBar(a.progress)}${checklistHtml(a.checklist)}</div>` : ''}
     ${agents || bg ? `<div class="sub-block"><div class="now-sec-head"><span>${subHead} berjalan</span></div>${agents}${bg}</div>` : ''}
-    ${a.starting ? '' : `<div class="now-actions"><button class="btn sm" data-act="compose" data-project="${esc(a.projectKey)}" data-session="${esc(a.sessionId)}">${icon('message', 'ic-sm')}Kirim prompt</button>${a.managed ? '<span class="board-tag">dari kanban</span>' : ''}</div>`}
+    ${a.starting ? '' : `<div class="now-actions"><button class="btn sm" data-act="compose" data-project="${esc(a.projectKey)}" data-session="${esc(a.sessionId)}">${icon('message', 'ic-sm')}Kirim prompt</button>${a.managed ? '<span class="board-tag">dari kanban</span>' : ''}${tokSum(a.tokens) ? `<span class="tok-chip" data-tip="${esc(tokTip(a.tokens, 'Token sesi ini (termasuk agent)'))}">${icon('coins', 'ic-xs')}${fmtTok(tokSum(a.tokens))}</span>` : ''}</div>`}
   </article>`;
 }
 
@@ -813,6 +1129,7 @@ function projCard(p) {
     <div class="pc-spark">${sparkline(p.spark)}<div class="spark-cap"><span>14 hari lalu</span><span>hari ini</span></div></div>
     <div class="pc-foot">
       ${prog && prog.total ? `<span>${ring(prog.pct, 18, 3)} ${prog.done}/${prog.total} task ${p.current ? 'saat ini' : '· 7 hari'}</span>` : '<span class="muted">Belum ada task</span>'}
+      ${tokSum(p.tokens && p.tokens.all) ? `<span data-tip="${esc(tokTip(p.tokens.all, 'Token project') + '\nHari ini: ' + num(tokSum(p.tokens.today)))}">${icon('coins', 'ic-xs')} ${fmtTok(tokSum(p.tokens.all))}</span>` : ''}
       <span class="push">${icon('layers', 'ic-xs')} ${p.sessionCount} sesi</span>
       ${p.runningAgents ? `<span style="color:var(--purple)">${icon('bot', 'ic-xs')} ${p.runningAgents}</span>` : ''}
     </div>
@@ -854,6 +1171,7 @@ function projectPageHtml() {
         : `<div class="stat tone-orange"><span class="stat-ic">${icon('checksq', 'ic-sm')}</span><div class="stat-text"><b class="small">Belum ada task</b><span>dalam 7 hari</span></div></div>`}
       <div class="stat tone-purple"><span class="stat-ic">${icon('bot', 'ic-sm')}</span><div class="stat-text"><b>${s.runningAgents}</b><span>agent berjalan</span></div></div>
       <div class="stat tone-blue"><span class="stat-ic">${icon('layers', 'ic-sm')}</span><div class="stat-text"><b>${s.sessionCount}</b><span>sesi</span></div></div>
+      ${P.tokens ? `<div class="stat tone-teal" data-tip="${esc(tokTip(P.tokens.all, 'Token project ini'))}"><span class="stat-ic">${icon('coins', 'ic-sm')}</span><div class="stat-text"><b>${fmtTok(tokSum(P.tokens.all))}</b><span>token · ${fmtTok(tokSum(P.tokens.today))} hari ini</span></div></div>` : ''}
       <div class="stat tone-neutral"><span class="stat-ic">${icon('clock', 'ic-sm')}</span><div class="stat-text"><b class="small">${ago(s.lastTs)}</b><span>aktivitas terakhir</span></div></div>
     </div>
   </header>
@@ -972,6 +1290,7 @@ function cardHtml(c) {
     if (c.taskStates && c.taskStates.length) body += segProgress(c.taskStates);
     const bits = [];
     if (c.agentCount) bits.push(`${icon('bot', 'ic-xs')}${c.agentCount} agent`);
+    if (tokSum(c.tokens)) bits.push(`<span data-tip="${esc(tokTip(c.tokens, c.agentCount ? 'Token request ini (termasuk agent)' : 'Token request ini'))}">${icon('coins', 'ic-xs')}${fmtTok(tokSum(c.tokens))}</span>`);
     if (c.source === 'queued') bits.push(`${icon('clock', 'ic-xs')}diketik saat Claude bekerja`);
     if (c.source === 'board') bits.push(`${icon('play', 'ic-xs')}dari kanban`);
     if (c.needs) bits.push(`<span style="color:var(--amber)">${icon('alert', 'ic-xs')}${esc(needsLabel(c.needs))}</span>`);
@@ -981,6 +1300,7 @@ function cardHtml(c) {
   } else if (c.kind === 'agent') {
     if (c.status === 'running' && c.activity) body += `<div class="card-act">${icon(toolIcon(c.activity.tool), 'ic-xs')}<span>${esc(c.activity.text || c.activity.tool)}</span></div>`;
     else if (c.summary || c.result) body += `<div class="card-snippet">${esc(trim(plain(c.summary || c.result), 220))}</div>`;
+    if (tokSum(c.tokens)) body += `<div class="card-bits"><span data-tip="${esc(tokTip(c.tokens, 'Token agent ini'))}">${icon('coins', 'ic-xs')}${fmtTok(tokSum(c.tokens))}</span>${c.toolCount ? `<span>${icon('terminal', 'ic-xs')}${c.toolCount} tool call</span>` : ''}</div>`;
   } else if (c.kind === 'bg' && c.text) {
     body += `<div class="card-snippet">${esc(c.text)}</div>`;
   } else if (c.kind === 'queued') {
@@ -1153,12 +1473,13 @@ function timelineSvg() {
 
 /* ---------- sessions ---------- */
 function sessionsHtml() {
-  return `<div class="sess-list">${S.project.sessions.map((x) => {
+  return `${tokensHtml(S.project.tokens, { title: 'Token project ini', sub: 'semua sesi dan agent project ini', key: 'ptokens' })}<div class="sess-list">${S.project.sessions.map((x) => {
     const facts = [
       ['message', `${x.promptCount} request`],
       x.progress.total ? ['checksq', `${x.progress.done}/${x.progress.total} task`] : null,
       x.agents.length ? ['bot', `${x.agents.length} agent`] : null,
       ['terminal', `${x.toolCount} tool call`],
+      tokSum(x.tokens) ? ['coins', `${fmtTok(tokSum(x.tokens))} token`, false, tokTip(x.tokens, 'Token sesi ini (termasuk agent)')] : null,
       x.branch ? ['branch', x.branch, true] : null,
       x.model ? ['cpu', x.model, true] : null,
       ['clock', `${fmt(x.firstTs)} → ${x.status === 'ended' ? fmt(x.lastTs) : 'sekarang'}`],
@@ -1168,14 +1489,14 @@ function sessionsHtml() {
     const summary = x.awaySummary ? x.awaySummary.text : x.lastText ? x.lastText.text : '';
     return `<article class="sess-card" data-key="sc:${esc(x.id)}" style="--sc:${hashColor(x.id)}">
       <div class="sess-top">
-        <h3 class="sess-title">${esc(x.title)}</h3>${pill(x.status, needsLabel(x.needs))}${x.managed ? '<span class="board-tag">dari kanban</span>' : ''}${x.live && x.live.pid ? `<span class="muted mono">PID ${x.live.pid}</span>` : ''}
+        <h3 class="sess-title">${esc(x.title)}</h3>${pill(x.status, needsLabel(x.needs))}${profTag(x.profile)}${x.managed ? '<span class="board-tag">dari kanban</span>' : ''}${x.live && x.live.pid ? `<span class="muted mono">PID ${x.live.pid}</span>` : ''}
         <div class="sess-actions">
           <button class="btn sm primary" data-act="compose" data-project="${esc(S.route.key)}" data-session="${esc(x.id)}">${icon('message', 'ic-sm')}Kirim prompt</button>
           <button class="btn sm" data-act="pick-session" data-v="${esc(x.id)}" data-tab="kanban">${icon('kanban', 'ic-sm')}Kanban</button>
           <button class="btn sm" data-act="pick-session" data-v="${esc(x.id)}" data-tab="timeline">${icon('timeline', 'ic-sm')}Timeline</button>
         </div>
       </div>
-      <div class="facts-row">${facts.map(([ic, t, mono]) => `<span>${icon(ic, 'ic-xs')}<span class="${mono ? 'mono' : ''}">${esc(t)}</span></span>`).join('')}</div>
+      <div class="facts-row">${facts.map(([ic, t, mono, tip]) => `<span${tip ? ` data-tip="${esc(tip)}"` : ''}>${icon(ic, 'ic-xs')}<span class="${mono ? 'mono' : ''}">${esc(t)}</span></span>`).join('')}</div>
       ${x.status !== 'ended' && x.activity ? activityRow(x.activity, 'Sekarang') : ''}
       ${progressRow(x.progress, 'Task')}
       ${summary ? `<div class="sess-summary">${icon('sparkle', 'ic-xs')}<span>${esc(trim(plain(summary), 420))}</span></div>` : ''}
@@ -1191,7 +1512,7 @@ const modelLabel = (m) => (MODELS.find((x) => x[0] === (m || '')) || [m, m])[1];
 
 function composerSessions(key) {
   if (S.project && S.project.summary.key === key) {
-    return S.project.sessions.map((x) => ({ id: x.id, title: x.title, status: x.status, needs: x.needs, managed: x.managed, liveKind: x.live ? x.live.kind || 'interactive' : null, lastTs: x.lastTs }));
+    return S.project.sessions.map((x) => ({ id: x.id, title: x.title, status: x.status, needs: x.needs, managed: x.managed, profile: x.profile, liveKind: x.live ? x.live.kind || 'interactive' : null, lastTs: x.lastTs }));
   }
   const p = S.overview && S.overview.projects.find((x) => x.key === key);
   return p ? p.recent || [] : [];
@@ -1202,7 +1523,8 @@ function routeInfo(c) {
   const p = S.overview && S.overview.projects.find((x) => x.key === c.projectKey);
   const sess = c.sessionId ? composerSessions(c.projectKey).find((x) => x.id === c.sessionId) : null;
   if (!sess) {
-    return { tone: 'blue', icon: 'play', fork: false, text: `Membuka sesi baru di <code>${esc(p ? p.path : '?')}</code>. Berjalan di background, progress-nya muncul di kanban ini.` };
+    const prof = profiles().length > 1 ? profileOf(c.profileId || (activeProfile() || {}).id) : null;
+    return { tone: 'blue', icon: 'play', fork: false, text: `Membuka sesi baru di <code>${esc(p ? p.path : '?')}</code>${prof ? ` dengan akun <b>${esc(prof.name)}</b>` : ''}. Berjalan di background, progress-nya muncul di kanban ini.` };
   }
   if (c.forceFork || (sess.liveKind && !sess.managed)) {
     return { tone: 'amber', icon: 'branch', fork: true, text: 'Sesi ini sedang terbuka di terminal, jadi kanban tidak mengetik ke sana. Prompt dijalankan sebagai <b>cabang baru</b> yang membawa seluruh riwayat percakapan sesi ini, di background.' };
@@ -1220,7 +1542,8 @@ function openComposer(opts = {}) {
   if (!projectKey) return;
   const sessionId = opts.sessionId && !String(opts.sessionId).startsWith('run:') ? opts.sessionId : '';
   if (S.drawer) closeDrawer();
-  S.composer = { projectKey, sessionId, text: '', sending: false, error: null, forceFork: false };
+  S.accounts = null;
+  S.composer = { projectKey, sessionId, text: '', sending: false, error: null, forceFork: false, profileId: null };
   renderComposer();
   setTimeout(() => { const ta = $('#modal textarea'); if (ta) ta.focus(); }, 30);
 }
@@ -1232,6 +1555,7 @@ function closeComposer() {
 function renderComposer() {
   const modal = $('#modal');
   const c = S.composer;
+  if (!c && S.accounts) return renderAccounts();
   if (!c) {
     if (modal.classList.contains('open')) { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); patch(modal, ''); }
     return;
@@ -1261,6 +1585,7 @@ function renderComposer() {
             <span class="field">${icon('layers', 'ic-sm')}<select data-act="cmp-session"><option value=""${c.sessionId ? '' : ' selected'}>＋ Sesi baru</option>${sessions.map((x) => `<option value="${esc(x.id)}"${x.id === c.sessionId ? ' selected' : ''}>${esc(sessLabel(x))}</option>`).join('')}</select>${icon('chevD', 'ic-sm after')}</span>
           </label>
         </div>
+        ${composerAccount(c, sessions)}
         <div class="cmp-route tone-${info.tone}">${icon(info.icon, 'ic-sm')}<span>${info.text}</span></div>
         <textarea data-act="cmp-text" rows="7" placeholder="Tulis prompt untuk Claude…" aria-label="Prompt">${esc(c.text)}</textarea>
         <div class="cmp-row">
@@ -1283,6 +1608,22 @@ function renderComposer() {
   if (!modal.classList.contains('open')) { modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false'); }
 }
 
+// Which account runs the prompt: chosen for a new session, fixed to the session's own otherwise.
+function composerAccount(c, sessions) {
+  const list = profiles();
+  if (list.length < 2) return '';
+  const sess = c.sessionId ? sessions.find((x) => x.id === c.sessionId) : null;
+  if (sess) {
+    const p = profileOf(sess.profile);
+    return `<div class="cmp-row"><div class="cmp-field"><span>Akun</span><span class="field static">${icon('user', 'ic-sm')}<span>${esc(p ? p.name : 'Utama')}${p && loggedIn(p) && p.account.data.email ? ` · ${esc(p.account.data.email)}` : ''}</span><span class="muted">akun sesi ini</span></span></div></div>`;
+  }
+  const chosen = c.profileId || (activeProfile() || {}).id;
+  const label = (p) => `${p.name} — ${loggedIn(p) ? p.account.data.email || 'login' : loggedOut(p) ? 'belum login' : 'memeriksa…'}${p.active ? ' (aktif)' : ''}`;
+  return `<div class="cmp-row"><label class="cmp-field"><span>Akun</span>
+    <span class="field">${icon('user', 'ic-sm')}<select data-act="cmp-profile">${list.map((p) => `<option value="${esc(p.id)}"${p.id === chosen ? ' selected' : ''}${loggedOut(p) ? ' disabled' : ''}>${esc(label(p))}</option>`).join('')}</select>${icon('chevD', 'ic-sm after')}</span>
+  </label></div>`;
+}
+
 async function sendComposer() {
   const c = S.composer;
   if (!c || c.sending || !c.text.trim()) return;
@@ -1293,6 +1634,7 @@ async function sendComposer() {
   const res = await api('/api/prompt', {
     projectKey: c.projectKey, sessionId: c.sessionId || null, fork: info.fork,
     prompt: c.text.trim(), permissionMode: S.ui.cmpMode, model: S.ui.cmpModel,
+    profileId: c.sessionId ? null : c.profileId || (activeProfile() || {}).id || null,
   });
   if (S.composer !== c) return;
   if (!res.ok) {
@@ -1342,6 +1684,8 @@ function linkRow(card, ic, extra = '') {
   return `<div class="link-row ${card.status}" data-card="${esc(card.id)}" data-key="lr:${esc(card.id)}">${ic}<span class="grow">${esc(card.title)}</span>${extra}</div>`;
 }
 
+const tokFact = (v, head) => `<span data-tip="${esc(tokTip(v, head))}">${fmtTok(tokSum(v))} <small class="muted">· output ${fmtTok(v[1])}</small></span>`;
+
 function drawerHtml(c) {
   const K = KIND[c.kind];
   const P = S.project;
@@ -1359,6 +1703,7 @@ function drawerHtml(c) {
     facts.push(['Dikirim', fmt(c.ts)], ['Aktivitas terakhir', fmt(c.endTs)], ['Durasi', dur(c.endTs - c.ts)]);
     if (c.progress) facts.push(['Task', `${c.progress.done}/${c.progress.total} selesai`]);
     if (agents.length) facts.push(['Agent', String(agents.length)]);
+    if (tokSum(c.tokens)) facts.push(['Token', tokFact(c.tokens, agents.length ? 'Token request ini (termasuk agent)' : 'Token request ini')]);
     if (c.source === 'queued') facts.push(['Dikirim saat', 'Claude sedang bekerja']);
     if (tasks.length) sections += sec('checksq', 'Progress task', `${progressRow(c.progress)}<div class="link-list" style="margin-top:8px">${tasks.map((t) => linkRow(t, statusIcon(t.status))).join('')}</div>`);
     if (agents.length) sections += sec('bot', 'Agent dari request ini', `<div class="link-list">${agents.map((a) => linkRow(a, statusIcon(a.status), `<span class="type-tag">${esc(a.agentType)}</span>`)).join('')}</div>`);
@@ -1380,6 +1725,7 @@ function drawerHtml(c) {
     if (c.endTs) facts.push(['Selesai', fmt(c.endTs)]);
     facts.push([c.status === 'running' ? 'Berjalan' : 'Durasi', dur((c.endTs || now) - c.ts)]);
     if (c.toolCount) facts.push(['Tool call', String(c.toolCount)]);
+    if (tokSum(c.tokens)) facts.push(['Token', tokFact(c.tokens, 'Token agent ini')]);
     if (c.branch) facts.push(['Branch', `<code>${esc(c.branch)}</code>`]);
     if (c.status === 'running' && c.activity) sections += sec('activity', 'Sedang melakukan', activityRow(c.activity));
     if (c.summary) sections += sec('sparkle', 'Ringkasan', `<div class="prose">${md(c.summary)}</div>`);
@@ -1421,7 +1767,7 @@ function drawerHtml(c) {
       </div>
     </div>
     <h2 class="dr-title">${esc(c.title || '(tanpa judul)')}</h2>
-    <div class="dr-sub"><span class="sess-chip" style="--sc:${hashColor(c.sessionId)}"><i></i><span>${esc(c.sessionTitle)}</span></span>${sess ? pill(sess.status) : ''}</div>
+    <div class="dr-sub"><span class="sess-chip" style="--sc:${hashColor(c.sessionId)}"><i></i><span>${esc(c.sessionTitle)}</span></span>${sess ? pill(sess.status) + profTag(sess.profile) : profTag(c.profileId)}</div>
   </header>
   <div class="dr-body">
     <div class="facts-grid">${facts.map(([l, v]) => `<div class="fact"><span>${l}</span><b>${v}</b></div>`).join('')}</div>
@@ -1471,6 +1817,41 @@ document.addEventListener('click', (e) => {
         openComposer({ projectKey: act.dataset.project, sessionId: act.dataset.session });
         return;
       case 'composer-close': closeComposer(); return;
+      case 'accounts': e.preventDefault(); openAccounts(); return;
+      case 'accounts-close': closeAccounts(); return;
+      case 'acc-add':
+        S.accounts.form = { name: '', dir: suggestDir(''), dirTouched: false, error: null, busy: false };
+        renderComposer();
+        setTimeout(() => { const i = $('#modal input[data-act=acc-name]'); if (i) i.focus(); }, 30);
+        return;
+      case 'acc-add-cancel': S.accounts.form = null; renderComposer(); return;
+      case 'acc-add-save': addAccount(); return;
+      case 'acc-activate':
+        api('/api/profiles/active', { id: v }).then((r) => {
+          const p = profileOf(v);
+          toast(r.ok
+            ? { tone: 'green', icon: 'swap', title: `Akun aktif: ${p ? p.name : v}`, body: 'Prompt baru dari kanban memakai akun ini.', ttl: 4000 }
+            : { tone: 'red', icon: 'alert', title: 'Gagal mengganti akun', body: r.error });
+          scheduleReload();
+        });
+        return;
+      case 'acc-remove': {
+        const p = profileOf(v);
+        if (!p || !confirm(`Hapus akun "${p.name}" dari kanban?\n\nFolder ${p.dir} beserta login dan riwayatnya tetap ada di disk, dan bisa ditambahkan lagi kapan saja.`)) return;
+        api('/api/profiles/remove', { id: v }).then((r) => {
+          toast(r.ok ? { tone: 'neutral', icon: 'x', title: `Akun "${p.name}" dihapus dari kanban`, ttl: 3500 } : { tone: 'red', icon: 'alert', title: 'Gagal menghapus akun', body: r.error });
+          scheduleReload();
+        });
+        return;
+      }
+      case 'acc-login':
+        api('/api/profiles/login', { id: v }).then((r) => {
+          if (!r.ok) toast({ tone: 'red', icon: 'alert', title: 'Login tidak bisa dimulai', body: r.error });
+          scheduleReload();
+        });
+        return;
+      case 'acc-login-cancel': api('/api/profiles/login-cancel', { id: v }).then(scheduleReload); return;
+      case 'acc-code-send': sendLoginCode(v); return;
       case 'cmp-send': sendComposer(); return;
       case 'cmp-mode': S.ui.cmpMode = v; saveUi(); renderComposer(); return;
       case 'usage-refresh':
@@ -1556,6 +1937,20 @@ document.addEventListener('input', (e) => {
     if (had !== !!S.composer.text.trim()) renderComposer();
   } else if (act === 'q') { S.ui.q = e.target.value; S.ui.doneLimit = 40; render(); }
   else if (act === 'projQ') { S.ui.projQ = e.target.value; renderChrome(); }
+  else if (S.accounts && act === 'acc-name' && S.accounts.form) {
+    const f = S.accounts.form;
+    f.name = e.target.value;
+    if (!f.dirTouched) f.dir = suggestDir(f.name);
+    renderComposer();
+  } else if (S.accounts && act === 'acc-dir' && S.accounts.form) {
+    S.accounts.form.dir = e.target.value;
+    S.accounts.form.dirTouched = true;
+    renderComposer();
+  } else if (S.accounts && act === 'acc-code') {
+    const had = !!(S.accounts.codes[e.target.dataset.v] || '').trim();
+    S.accounts.codes[e.target.dataset.v] = e.target.value;
+    if (had !== !!e.target.value.trim()) renderComposer();
+  }
 });
 document.addEventListener('change', (e) => {
   const act = e.target.dataset && e.target.dataset.act;
@@ -1563,18 +1958,24 @@ document.addEventListener('change', (e) => {
   else if (act === 'cmp-project' && S.composer) { S.composer.projectKey = e.target.value; S.composer.sessionId = ''; S.composer.forceFork = false; S.composer.error = null; renderComposer(); }
   else if (act === 'cmp-session' && S.composer) { S.composer.sessionId = e.target.value; S.composer.forceFork = false; S.composer.error = null; renderComposer(); }
   else if (act === 'cmp-model') { S.ui.cmpModel = e.target.value; saveUi(); }
+  else if (act === 'cmp-profile' && S.composer) { S.composer.profileId = e.target.value; S.composer.error = null; renderComposer(); }
 });
 document.addEventListener('keydown', (e) => {
   const el = e.target;
   const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
   if (S.composer && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendComposer(); return; }
+  if (S.accounts && e.key === 'Enter' && el && el.dataset) {
+    if (el.dataset.act === 'acc-name' || el.dataset.act === 'acc-dir') { e.preventDefault(); addAccount(); return; }
+    if (el.dataset.act === 'acc-code') { e.preventDefault(); sendLoginCode(el.dataset.v); return; }
+  }
   if (e.key === 'Escape') {
     if (S.composer) closeComposer();
+    else if (S.accounts) closeAccounts();
     else if (S.drawer) closeDrawer();
     else if (typing) el.blur();
     return;
   }
-  if (typing || e.ctrlKey || e.metaKey || e.altKey || S.composer) return;
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || S.composer || S.accounts) return;
   if (e.key === 'n' || e.key === 'N') {
     e.preventDefault();
     openComposer();
