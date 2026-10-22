@@ -56,6 +56,13 @@ drone untuk melihat detail. Klik robot atau drone untuk membuka kartunya di kanb
 nama project untuk mendekatkan kamera. Tombol **Putar**, **Label agent**, **Semua**, dan layar
 penuh ada di pojok kanan atas.
 
+**Klik 2x** robot, meja, atau papan nama project untuk membuka jendela terminal baru (Windows
+Terminal, atau PowerShell kalau Windows Terminal tidak ada) di folder project itu, yang langsung
+menjalankan `claude --resume` untuk sesi terakhirnya. Sesi yang masih terbuka di terminal lain
+dilewati, karena satu sesi tidak bisa dipakai dua proses sekaligus, jadi yang dilanjutkan adalah
+sesi terakhir yang bebas. Kalau tidak ada sesi yang bisa dilanjutkan, terminal membuka sesi Claude
+baru. Sesi milik akun tambahan dibuka dengan `CLAUDE_CONFIG_DIR` akun tersebut.
+
 Three.js disertakan di `public/vendor/three` (r170, lisensi MIT) dan baru dimuat saat tampilan 3D
 dibuka, jadi tidak butuh internet dan halaman lain tidak ikut berat. Kalau browser tidak
 mendukung WebGL, halaman ini menampilkan pesan.

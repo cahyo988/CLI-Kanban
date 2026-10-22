@@ -9,6 +9,7 @@ const { Collector, projectKeyOf, stripWorktree } = require('./lib/collector');
 const { overview, projectDetail } = require('./lib/model');
 const { Profiles } = require('./lib/profiles');
 const { Runner } = require('./lib/runner');
+const { openTerminal } = require('./lib/terminal');
 
 const profiles = new Profiles();
 const collector = new Collector(() => profiles.roots());
@@ -165,6 +166,42 @@ async function handlePrompt(req, res) {
   return sendJson(res, 200, { ok: true, queued: false, id: out.run.id });
 }
 
+/* ---------- open a terminal on a project's latest session ---------- */
+async function handleTerminal(req, res) {
+  const body = await readBody(req);
+  if (process.platform !== 'win32') return sendJson(res, 501, { error: 'Membuka terminal baru hanya didukung di Windows.' });
+  const key = String(body.projectKey || '');
+  const clicked = body.sessionId ? String(body.sessionId) : null;
+  const snap = snapshot();
+  const sessions = [...snap.sessions.entries()]
+    .filter(([, s]) => s.entry.state.cwd && projectKeyOf(s.entry.state.cwd) === key)
+    .sort((a, b) => b[1].entry.state.lastTs - a[1].entry.state.lastTs);
+  if (!sessions.length) return sendJson(res, 404, { error: 'Project tidak ditemukan.' });
+  const name = path.basename(stripWorktree(sessions[0][1].entry.state.cwd));
+  // A session still open in a terminal (or run by the board) can't take a second process,
+  // so resume the newest one that is free.
+  const busy = (sid) => snap.live.has(sid) || !!runner.activeRun(sid);
+  const target = sessions.find(([sid, s]) => !busy(sid) && s.entry.state.prompts.length && isDir(s.entry.state.cwd));
+  const skipped = !!(clicked && busy(clicked));
+  if (target) {
+    const [sid, s] = target;
+    const profileId = s.entry.profile || 'default';
+    const prof = profiles.get(profileId);
+    if (!prof) return sendJson(res, 400, { error: 'Akun pemilik sesi ini tidak ada lagi di kanban.' });
+    const title = s.entry.state.title || s.entry.state.agentName || 'Sesi ' + sid.slice(0, 8);
+    const via = openTerminal({
+      cwd: s.entry.state.cwd, args: ['--resume', sid], configDir: prof.isDefault ? null : prof.dir,
+      title: `Claude · ${name}`, banner: `Melanjutkan sesi: ${title}`,
+    });
+    return sendJson(res, 200, { ok: true, mode: 'resume', sessionId: sid, title, skipped, via });
+  }
+  const cwd = projectPath(snap, key);
+  if (!cwd || !isDir(cwd)) return sendJson(res, 400, { error: `Folder project tidak ditemukan: ${cwd || '?'}` });
+  const prof = profiles.get(profiles.active);
+  const via = openTerminal({ cwd, configDir: prof && !prof.isDefault ? prof.dir : null, title: `Claude · ${name}`, banner: 'Sesi baru: belum ada sesi project ini yang bisa dilanjutkan.' });
+  return sendJson(res, 200, { ok: true, mode: 'new', skipped, via });
+}
+
 /* ---------- account profiles ---------- */
 async function handleProfiles(action, req, res) {
   const body = await readBody(req);
@@ -201,6 +238,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST') {
       if (!writeAllowed(req)) return sendJson(res, 403, { error: 'Permintaan ditolak. Muat ulang halaman kanban.', code: 'token' });
       if (url.pathname === '/api/prompt') return await handlePrompt(req, res);
+      if (url.pathname === '/api/terminal') return await handleTerminal(req, res);
       if (url.pathname === '/api/queue/cancel') {
         const body = await readBody(req);
         return sendJson(res, runner.cancelQueued(String(body.id || '')) ? 200 : 404, { ok: true });

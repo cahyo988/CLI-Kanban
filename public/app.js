@@ -1175,7 +1175,7 @@ function officeHtml() {
     </div>
     <div class="o3d-hud o3d-legend" data-key="o3d-legend">
       <span><i class="sw tone-green"></i>Bekerja</span><span><i class="sw tone-amber"></i>Menunggu kamu</span><span><i class="sw tone-blue"></i>Memulai</span><span><i class="sw round tone-purple"></i>Agent</span><span><i class="sw tone-teal"></i>Background</span>
-      <span class="o3d-hint">Seret untuk memutar · scroll untuk zoom · klik robot untuk detail</span>
+      <span class="o3d-hint">Seret untuk memutar · scroll untuk zoom · klik robot untuk detail · klik 2x untuk buka terminal + /resume</span>
     </div>
     ${overlay}
   </div>`;
@@ -1194,7 +1194,7 @@ function syncOffice() {
     officeLoad = null;
     const stage = S.route.view === '3d' ? $('#main .o3d-stage') : null;
     if (!stage || office) return;
-    office = m.createOffice(stage, { esc, color: hashColor, ago: agoShort, onOpen: goToCard });
+    office = m.createOffice(stage, { esc, color: hashColor, ago: agoShort, onOpen: goToCard, onTerminal: openTerminal });
     office.setAutoRotate(S.ui.o3dRotate);
     office.setAgentLabels(S.ui.o3dLabels);
     if (S.overview) office.update(officeData());
@@ -1204,6 +1204,21 @@ function syncOffice() {
     console.warn('Kantor 3D:', e);
     render();
   });
+}
+
+// Opens a terminal window in the project running `claude --resume` on its newest free session.
+let terminalBusy = 0;
+async function openTerminal(projectKey, sessionId) {
+  if (Date.now() - terminalBusy < 1500) return;
+  terminalBusy = Date.now();
+  const p = (S.overview.projects || []).find((x) => x.key === projectKey);
+  const name = p ? p.name : 'project';
+  const r = await api('/api/terminal', { projectKey, sessionId });
+  if (!r.ok) { toast({ tone: 'red', icon: 'alert', title: `Terminal gagal dibuka · ${name}`, body: r.error || 'Coba lagi.', ttl: 10000 }); return; }
+  const body = r.mode === 'resume'
+    ? `claude --resume: ${r.title}` + (r.skipped ? '. Sesi yang kamu klik masih terbuka di terminal lain, jadi yang dilanjutkan sesi terakhir yang bebas.' : '')
+    : 'Belum ada sesi yang bisa dilanjutkan, jadi terminal membuka sesi Claude baru.';
+  toast({ tone: 'green', icon: 'terminal', title: `Terminal dibuka · ${name}`, body, ttl: r.skipped ? 11000 : 7000 });
 }
 
 function skeletonOverview() {

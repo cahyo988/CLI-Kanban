@@ -774,14 +774,15 @@ export function createOffice(container, opts = {}) {
       if (a.activity && a.status === 'working') lines.push('Sekarang: ' + a.activity.tool + ' ' + clip(a.activity.text || '', 70));
       if (a.agents.length) lines.push(`${a.agents.length} agent berjalan`);
       if (a.bg.length) lines.push(`${a.bg.length} proses background`);
-      lines.push('Klik untuk buka detail');
+      lines.push('Klik: detail · klik 2x: terminal + /resume terakhir');
       return lines.join('\n');
     }
     if (info.kind === 'agent' && info.drone.data) {
       const g = info.drone.data;
-      return [`Agent · ${g.description}`, g.type || 'agent', g.activity ? 'Sekarang: ' + g.activity.tool + ' ' + clip(g.activity.text || '', 70) : 'memulai…', 'Klik untuk buka detail'].join('\n');
+      return [`Agent · ${g.description}`, g.type || 'agent', g.activity ? 'Sekarang: ' + g.activity.tool + ' ' + clip(g.activity.text || '', 70) : 'memulai…', 'Klik: detail · klik 2x: terminal + /resume terakhir'].join('\n');
     }
-    if (info.kind === 'project') return `${info.pod.name}\nKlik untuk dekatkan kamera`;
+    if (info.kind === 'project') return `${info.pod.name}\nKlik: dekatkan kamera · klik 2x: terminal + /resume terakhir`;
+    if (info.kind === 'session') return `${info.desk.pod.name}\nKlik 2x: buka terminal + /resume terakhir`;
     return null;
   }
   let hovered = null;
@@ -795,11 +796,33 @@ export function createOffice(container, opts = {}) {
   }
   let downAt = null;
   const onDown = (ev) => { downAt = [ev.clientX, ev.clientY]; };
+  // What a double click opens a terminal on: the project, and the session when a robot was hit.
+  function terminalTarget(info) {
+    if (info.kind === 'project') return { key: info.pod.key, sessionId: null };
+    const desk = info.kind === 'agent' ? info.drone.desk : info.desk;
+    const a = desk.data;
+    return { key: desk.pod.key, sessionId: a && !a.starting ? a.sessionId : null };
+  }
+  // One click opens details and two open a terminal, so a single click waits a moment to tell them apart.
+  let clickTimer = null, lastClick = null;
   function onUp(ev) {
     if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return;
     downAt = null;
     const info = hit(ev);
     if (!info) return;
+    const target = terminalTarget(info);
+    if (clickTimer && lastClick && lastClick.key === target.key) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      if (opts.onTerminal) opts.onTerminal(target.key, target.sessionId);
+      return;
+    }
+    clearTimeout(clickTimer);
+    lastClick = target;
+    clickTimer = setTimeout(() => { clickTimer = null; singleClick(info); }, 260);
+  }
+  function singleClick(info) {
+    if (disposed) return;
     if (info.kind === 'project') focusPod(info.pod.key);
     else if (info.kind === 'session' && info.desk.data && opts.onOpen) {
       const a = info.desk.data;
@@ -811,11 +834,16 @@ export function createOffice(container, opts = {}) {
     const f = ev.target.closest('[data-o3d-focus]');
     if (f) { ev.preventDefault(); focusPod(f.dataset.o3dFocus); }
   }
+  function onLabelDbl(ev) {
+    const f = ev.target.closest('[data-o3d-focus]');
+    if (f && opts.onTerminal) { ev.preventDefault(); opts.onTerminal(f.dataset.o3dFocus, null); }
+  }
   renderer.domElement.addEventListener('pointermove', onMove);
   renderer.domElement.addEventListener('pointerdown', onDown);
   renderer.domElement.addEventListener('pointerup', onUp);
   renderer.domElement.addEventListener('pointerleave', () => { renderer.domElement.removeAttribute('data-tip'); });
   labelLayer.addEventListener('click', onLabelClick);
+  labelLayer.addEventListener('dblclick', onLabelDbl);
 
   function focusPod(key) {
     const p = pods.get(key);
@@ -903,6 +931,7 @@ export function createOffice(container, opts = {}) {
     },
     dispose() {
       disposed = true;
+      clearTimeout(clickTimer);
       cancelAnimationFrame(raf);
       ro.disconnect();
       for (const p of pods.values()) p.dispose();
