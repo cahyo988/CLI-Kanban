@@ -45,6 +45,10 @@ const I = {
   users: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.2a6.5 6.5 0 0 1 3.5 5.3"/>',
   swap: '<path d="M7 7.5h12.5l-3.5-3.5M17 16.5H4.5L8 20"/>',
   coins: '<ellipse cx="12" cy="6.5" rx="7" ry="3"/><path d="M5 6.5v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5M5 11.5v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>',
+  cube: '<path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7L12 12l7.5-4.3M12 12v8.5"/>',
+  rotate: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
+  expand: '<path d="M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15"/>',
+  tag: '<path d="M4 12.6V5.5A1.5 1.5 0 0 1 5.5 4h7.1l7.4 7.4a1.5 1.5 0 0 1 0 2.1l-6 6a1.5 1.5 0 0 1-2.1 0z"/><circle class="f" cx="8.5" cy="8.5" r="1.4"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.8l2 2h7.2a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
 };
 const icon = (name, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[name] || I.circle}</svg>`;
@@ -141,15 +145,15 @@ function loadUi() {
     tab: 'kanban', range: '7d', tlRange: '24h',
     kinds: { request: true, task: true, agent: true, bg: false },
     tlTasks: true, tlAgents: true, theme: 'auto', notify: false,
-    cmpMode: 'auto', cmpModel: '',
+    cmpMode: 'auto', cmpModel: '', o3dRotate: false, o3dLabels: false,
   };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem('ck.ui') || '{}') || {}; } catch {}
   return { ...def, ...saved, kinds: { ...def.kinds, ...(saved.kinds || {}) }, session: 'all', q: '', projQ: '', doneLimit: 40, tlCollapsed: [] };
 }
 function saveUi() {
-  const { tab, range, tlRange, kinds, tlTasks, tlAgents, theme, notify, cmpMode, cmpModel } = S.ui;
-  try { localStorage.setItem('ck.ui', JSON.stringify({ tab, range, tlRange, kinds, tlTasks, tlAgents, theme, notify, cmpMode, cmpModel })); } catch {}
+  const { tab, range, tlRange, kinds, tlTasks, tlAgents, theme, notify, cmpMode, cmpModel, o3dRotate, o3dLabels } = S.ui;
+  try { localStorage.setItem('ck.ui', JSON.stringify({ tab, range, tlRange, kinds, tlTasks, tlAgents, theme, notify, cmpMode, cmpModel, o3dRotate, o3dLabels })); } catch {}
 }
 
 /* ==========================================================================
@@ -343,6 +347,8 @@ function morphNode(a, b) {
     if (document.activeElement !== a && a.value !== b.value) a.value = b.value;
     return;
   }
+  // data-keep marks a node whose children belong to someone else (the 3D canvas and its labels).
+  if (a.hasAttribute('data-keep')) return;
   morphChildren(a, b);
   if (a.nodeName === 'SELECT' && document.activeElement !== a) {
     const sel = b.querySelector('option[selected]');
@@ -517,6 +523,8 @@ function parseRoute() {
     S.route = { view: 'project', key, tab };
     S.ui.tab = tab;
     saveUi();
+  } else if (parts[0] === '3d') {
+    S.route = { view: '3d' };
   } else {
     S.route = { view: 'overview' };
   }
@@ -543,7 +551,8 @@ function render() {
   applyTheme();
   measure();
   patch($('#sidebar'), sidebarHtml());
-  patch($('#main'), S.route.view === 'project' ? projectPageHtml() : overviewHtml());
+  patch($('#main'), S.route.view === 'project' ? projectPageHtml() : S.route.view === '3d' ? officeHtml() : overviewHtml());
+  syncOffice();
   if (S.drawer) renderDrawer();
   renderComposer();
   const waiting = S.overview ? S.overview.kpi.waiting : 0;
@@ -609,6 +618,7 @@ function sidebarHtml() {
   </div>
   <nav class="sb-nav">
     <a class="nav-item${S.route.view === 'overview' ? ' active' : ''}" href="#/">${icon('grid')}<span>Semua project</span>${waiting ? `<span class="nav-badge tone-amber" title="${waiting} sesi menunggu kamu">${waiting}</span>` : ''}</a>
+    <a class="nav-item${S.route.view === '3d' ? ' active' : ''}" href="#/3d">${icon('cube')}<span>Kantor 3D</span>${ov && ov.kpi.working ? `<span class="live-dot tone-green" title="${ov.kpi.working} sesi bekerja"></span>` : ''}</a>
   </nav>
   <label class="sb-search">${icon('search', 'ic-sm')}<input type="search" placeholder="Cari project…" value="${esc(S.ui.projQ)}" data-act="projQ" aria-label="Cari project"></label>
   <div class="sb-scroll">
@@ -1017,7 +1027,7 @@ function overviewHtml() {
   return `
   <header class="page-head">
     <div><h1 class="page-title">Semua project</h1><p class="page-sub">Apa yang sedang dikerjakan Claude Code dan agent-nya di PC ini, secara live.</p></div>
-    <div class="head-right">${livePill()}<button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
+    <div class="head-right">${livePill()}<a class="btn" href="#/3d" title="Lihat sesi dan agent sebagai kantor 3D">${icon('cube', 'ic-sm')}Kantor 3D</a><button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
   </header>
   ${usageHtml()}
   ${tokensHtml(ov.tokens)}
@@ -1134,6 +1144,66 @@ function projCard(p) {
       ${p.runningAgents ? `<span style="color:var(--purple)">${icon('bot', 'ic-xs')} ${p.runningAgents}</span>` : ''}
     </div>
   </a>`;
+}
+
+/* ---------- Kantor 3D ---------- */
+function officeHtml() {
+  const ov = S.overview;
+  const k = ov ? ov.kpi : { working: 0, waiting: 0, agents: 0 };
+  const bg = ov ? ov.active.reduce((n, a) => n + a.bg.length, 0) : 0;
+  const stat = (tone, n, label) => `<span class="o3d-stat tone-${tone}"><span class="dot"></span><b class="num">${n}</b>${label}</span>`;
+  const tog = (act, on, ic, label) => `<button class="btn sm${on ? ' on' : ''}" data-act="${act}" aria-pressed="${on}">${icon(ic, 'ic-sm')}<span>${label}</span></button>`;
+  let overlay = '';
+  if (S.o3dError) overlay = `<div class="o3d-msg" data-key="o3d-msg">${emptyState('alert', 'Tampilan 3D tidak bisa dibuka', `Browser ini tidak menyediakan WebGL (${esc(S.o3dError)}). Coba aktifkan akselerasi hardware di pengaturan browser.`)}</div>`;
+  else if (!ov) overlay = `<div class="o3d-msg" data-key="o3d-msg"><div class="skel" style="width:220px;height:16px"></div></div>`;
+  else if (!ov.active.length) overlay = `<div class="o3d-note" data-key="o3d-note">${icon('terminal', 'ic-sm')}<span>Belum ada sesi yang berjalan, jadi kantornya masih sepi. Jalankan <code>claude</code> di terminal atau kirim prompt, dan robotnya langsung duduk bekerja.</span></div>`;
+  return `
+  <header class="page-head">
+    <div><h1 class="page-title">Kantor 3D</h1><p class="page-sub">Tiap robot adalah sesi Claude Code, tiap drone ungu adalah agent yang sedang jalan. Robot yang menoleh ke kamu sedang menunggu balasanmu.</p></div>
+    <div class="head-right">${livePill()}<button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
+  </header>
+  <div class="o3d-wrap" data-key="o3d-wrap">
+    <div class="o3d-stage" data-key="o3d-stage" data-keep></div>
+    <div class="o3d-hud o3d-top" data-key="o3d-top">
+      <div class="o3d-stats">${stat('green', k.working, 'bekerja')}${stat('amber', k.waiting, 'menunggu kamu')}${stat('purple', k.agents, 'agent')}${bg ? stat('teal', bg, 'background') : ''}</div>
+      <div class="o3d-ctrl">
+        ${tog('o3d-rotate', S.ui.o3dRotate, 'rotate', 'Putar')}
+        ${tog('o3d-labels', S.ui.o3dLabels, 'tag', 'Label agent')}
+        <button class="btn sm" data-act="o3d-fit" title="Tampilkan semua project">${icon('grid', 'ic-sm')}<span>Semua</span></button>
+        <button class="btn sm icon-btn" data-act="o3d-full" title="Layar penuh" aria-label="Layar penuh">${icon('expand', 'ic-sm')}</button>
+      </div>
+    </div>
+    <div class="o3d-hud o3d-legend" data-key="o3d-legend">
+      <span><i class="sw tone-green"></i>Bekerja</span><span><i class="sw tone-amber"></i>Menunggu kamu</span><span><i class="sw tone-blue"></i>Memulai</span><span><i class="sw round tone-purple"></i>Agent</span><span><i class="sw tone-teal"></i>Background</span>
+      <span class="o3d-hint">Seret untuk memutar · scroll untuk zoom · klik robot untuk detail</span>
+    </div>
+    ${overlay}
+  </div>`;
+}
+
+// The Three.js scene loads on first visit and is torn down when you leave the view, so other pages pay nothing for it.
+let office = null, officeLoad = null;
+const officeData = () => ({ active: S.overview.active, projects: S.overview.projects });
+function syncOffice() {
+  const el = S.route.view === '3d' ? $('#main .o3d-stage') : null;
+  if (office && office.el !== el) { office.dispose(); office = null; }
+  if (!el) return;
+  if (office) { if (S.overview) office.update(officeData()); return; }
+  if (officeLoad || S.o3dError) return;
+  officeLoad = import('/office3d.js').then((m) => {
+    officeLoad = null;
+    const stage = S.route.view === '3d' ? $('#main .o3d-stage') : null;
+    if (!stage || office) return;
+    office = m.createOffice(stage, { esc, color: hashColor, ago: agoShort, onOpen: goToCard });
+    office.setAutoRotate(S.ui.o3dRotate);
+    office.setAgentLabels(S.ui.o3dLabels);
+    if (S.overview) office.update(officeData());
+  }).catch((e) => {
+    officeLoad = null;
+    S.o3dError = (e && e.message) || String(e);
+    console.warn('Kantor 3D:', e);
+    render();
+  });
 }
 
 function skeletonOverview() {
@@ -1891,6 +1961,15 @@ document.addEventListener('click', (e) => {
         location.hash = projectHref(S.route.key, act.dataset.tab);
         return;
       case 'copy': copyText(v); return;
+      case 'o3d-rotate': S.ui.o3dRotate = !S.ui.o3dRotate; if (office) office.setAutoRotate(S.ui.o3dRotate); break;
+      case 'o3d-labels': S.ui.o3dLabels = !S.ui.o3dLabels; if (office) office.setAgentLabels(S.ui.o3dLabels); break;
+      case 'o3d-fit': if (office) office.fit(); return;
+      case 'o3d-full': {
+        const w = $('.o3d-wrap');
+        if (document.fullscreenElement) document.exitFullscreen();
+        else if (w && w.requestFullscreen) w.requestFullscreen().catch(() => {});
+        return;
+      }
       case 'copy-card': {
         const c = S.project && S.project.cards.find((k) => k.id === S.drawer);
         if (c) copyText(c.kind === 'agent' ? c.result || c.text || c.title : c.text || c.title);

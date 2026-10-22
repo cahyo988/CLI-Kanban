@@ -33,6 +33,33 @@ Folder Claude bisa diganti lewat `CLAUDE_CONFIG_DIR`.
 Klik kartu atau bar timeline untuk melihat detail lengkap. Laporan agent dan isi request
 dirender sebagai markdown (heading, list, kode, tabel).
 
+### Kantor 3D
+
+Menu **Kantor 3D** (atau `#/3d`) menampilkan semua yang sedang berjalan sebagai kantor 3D
+(Three.js):
+
+- Tiap project jadi satu "pod" berwarna dengan papan nama. Project yang sedang sepi tetap
+  tampil sebagai meja kosong yang lebih redup.
+- Tiap **sesi live** jadi robot di meja:
+  - robot yang **bekerja** mengetik, dan layarnya menampilkan kode yang bergulir
+  - robot yang **menunggu kamu** memutar kursinya menghadap kamera dengan gelembung `…`, atau
+    `!` kalau butuh izin atau jawaban
+  - robot yang **memulai** ditandai warna biru
+- Tiap **agent** jadi drone ungu yang mengitari meja sesinya, terhubung ke layar dengan berkas
+  cahaya. Drone menyala tiap kali agent memakai tool, lalu terbang naik saat agent selesai.
+- **Proses background** jadi server kecil dengan lampu berkedip.
+- Ada efek kecil untuk kejadian: pesawat kertas saat ada request baru, confetti saat task di
+  checklist selesai.
+
+Seret untuk memutar, scroll untuk zoom, klik kanan untuk menggeser. Arahkan kursor ke robot atau
+drone untuk melihat detail. Klik robot atau drone untuk membuka kartunya di kanban, dan klik papan
+nama project untuk mendekatkan kamera. Tombol **Putar**, **Label agent**, **Semua**, dan layar
+penuh ada di pojok kanan atas.
+
+Three.js disertakan di `public/vendor/three` (r170, lisensi MIT) dan baru dimuat saat tampilan 3D
+dibuka, jadi tidak butuh internet dan halaman lain tidak ikut berat. Kalau browser tidak
+mendukung WebGL, halaman ini menampilkan pesan.
+
 ### Pemakaian Claude (`/usage`)
 
 Panel paling atas di halaman utama, dan meter kecil di sidebar, menampilkan limit paketmu:

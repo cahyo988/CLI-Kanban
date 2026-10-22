@@ -15,6 +15,8 @@
     if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   </script>
   <link rel="stylesheet" href="/style.css">
+  <!-- Three.js is vendored (MIT, public/vendor/three) and only fetched when the 3D view opens. -->
+  <script type="importmap">{ "imports": { "three": "/vendor/three/three.module.min.js" } }</script>
 </head>
 <body>
   <div class="app">
