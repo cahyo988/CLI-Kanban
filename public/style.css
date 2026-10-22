@@ -1045,17 +1045,23 @@ button.acct:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
 .o3d-wrap:fullscreen { height: 100vh; border: 0; border-radius: 0; }
 .o3d-stage { position: absolute; inset: 0; }
 .o3d-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
-.o3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* Its own layer, so labels (z-index by distance) stay under the HUD. */
+.o3d-labels { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
 .o3d-lab { position: absolute; left: 0; top: 0; transform-origin: 50% 100%; will-change: transform; }
 .o3d-lab > * { pointer-events: auto; }
 
+/* Labels in the voxel scene are chunky too: thick borders and a hard drop shadow instead of a blur. */
 .o3d-sess {
-  margin-bottom: 8px; padding: 6px 10px 7px; min-width: 150px; max-width: 250px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(6px);
-  border: 1px solid var(--border); border-top: 2px solid var(--tone); border-radius: var(--r-md);
-  box-shadow: var(--shadow-2); font-size: 12px; line-height: 1.35; cursor: pointer;
+  --edge: color-mix(in srgb, var(--tone) 60%, var(--border));
+  position: relative; margin-bottom: 12px; padding: 6px 10px 7px; min-width: 150px; max-width: 250px;
+  background: var(--surface); border: 2px solid var(--edge); border-radius: var(--r-sm);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--tone) 40%, transparent); font-size: 12px; line-height: 1.35; cursor: pointer;
 }
-.o3d-sess:hover { border-color: var(--tone); }
+.o3d-sess::after {
+  content: ""; position: absolute; left: 50%; bottom: -7px; width: 10px; height: 10px;
+  background: var(--surface); border: solid var(--edge); border-width: 0 2px 2px 0; transform: translateX(-50%) rotate(45deg);
+}
+.o3d-sess:hover { --edge: var(--tone); }
 .o3d-sess-top { display: flex; align-items: center; gap: 6px; }
 .o3d-sess-top b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .o3d-sess .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); color: var(--tone); flex: none; }
@@ -1070,19 +1076,19 @@ button.acct:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
 .o3d-sess-act { margin-top: 3px; font: 11px/1.35 var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .o3d-agent {
-  margin-bottom: 6px; padding: 4px 8px; max-width: 210px; border-radius: var(--r-sm); cursor: pointer;
-  background: color-mix(in srgb, var(--purple-soft) 90%, transparent); color: var(--text);
-  border: 1px solid color-mix(in srgb, var(--purple) 35%, transparent); font-size: 11px; line-height: 1.3;
+  margin-bottom: 8px; padding: 4px 8px; max-width: 210px; border-radius: var(--r-xs); cursor: pointer;
+  background: var(--purple-soft); color: var(--text); font-size: 11px; line-height: 1.3;
+  border: 2px solid color-mix(in srgb, var(--purple) 55%, transparent); box-shadow: 0 2px 0 color-mix(in srgb, var(--purple) 35%, transparent);
 }
 .o3d-agent b, .o3d-agent small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .o3d-agent small { color: var(--purple-ink); font-size: 10.5px; }
 
 .o3d-proj {
-  display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 4px; transform: translateY(100%);
-  background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(6px);
-  border: 1px solid var(--border); border-radius: var(--r-full); box-shadow: var(--shadow-1); font-size: 12px; white-space: nowrap;
+  display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 3px; transform: translateY(100%);
+  background: var(--surface); border: 2px solid color-mix(in srgb, var(--pc) 55%, var(--border)); border-radius: var(--r-sm);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--pc) 35%, transparent); font-size: 12px; white-space: nowrap;
 }
-.o3d-proj:not(.on) { opacity: .72; }
+.o3d-proj:not(.on) { opacity: .86; }
 .o3d-proj-name { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-weight: 650; color: var(--text); padding: 2px 6px 2px 4px; border: 0; border-radius: var(--r-full); background: none; cursor: pointer; }
 .o3d-proj-name:hover { background: var(--hover); }
 .o3d-proj-name i { width: 10px; height: 10px; border-radius: 3px; background: var(--pc); }

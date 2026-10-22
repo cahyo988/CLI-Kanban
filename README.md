@@ -37,28 +37,36 @@ dirender sebagai markdown (heading, list, kode, tabel).
 
 ### Kantor 3D
 
-Menu **Kantor 3D** (atau `#/3d`) menampilkan semua yang sedang berjalan sebagai kantor 3D
-(Three.js):
+Menu **Kantor 3D** (atau `#/3d`) menampilkan semua yang sedang berjalan sebagai pulau voxel
+(Three.js), dengan gaya kotak-kotak ala game:
 
-- Tiap project jadi satu "pod" berwarna dengan papan nama. Project yang sedang sepi tetap
-  tampil sebagai meja kosong yang lebih redup.
-- Tiap **sesi live** jadi robot di meja:
-  - robot yang **bekerja** mengetik, dan layarnya menampilkan kode yang bergulir
-  - robot yang **menunggu kamu** memutar kursinya menghadap kamera dengan gelembung `…`, atau
-    `!` kalau butuh izin atau jawaban
+- Tiap project dapat satu **kavling** berpagar dengan papan nama dan bendera warna project.
+  - Project yang punya sesi live jadi **kantor terbuka** berlantai kotak-kotak.
+  - Project yang sedang sepi jadi **rumah mungil** beratap warna project, dengan asap cerobong.
+    Begitu ada sesi baru, rumahnya menyingkir dan meja-meja muncul.
+- Tiap **sesi live** jadi robot voxel di meja, dengan wajah piksel yang berekspresi:
+  - robot yang **bekerja** mengetik, matanya hijau, dan layarnya menampilkan kode yang bergulir
+  - robot yang **menunggu kamu** memutar kursinya ke kamera, tersenyum `^ ^`, melambai, dan
+    memunculkan gelembung `…`
+  - robot yang **butuh izin atau jawaban** bermata lebar dengan gelembung `!`
   - robot yang **memulai** ditandai warna biru
-- Tiap **agent** jadi drone ungu yang mengitari meja sesinya, terhubung ke layar dengan berkas
-  cahaya. Drone menyala tiap kali agent memakai tool, lalu terbang naik saat agent selesai.
+  - saat task di checklist selesai, robotnya melompat dan confetti kubus bertebaran
+- Tiap **agent** jadi drone ungu berbaling-baling yang mengitari meja sesinya, terhubung ke layar
+  dengan berkas cahaya. Drone menyala tiap kali agent memakai tool, lalu pecah jadi kubus saat
+  agent selesai.
 - **Proses background** jadi server kecil dengan lampu berkedip.
-- Ada efek kecil untuk kejadian: pesawat kertas saat ada request baru, confetti saat task di
-  checklist selesai.
+- Request baru datang sebagai amplop yang terbang ke meja.
+- Pulau ikut membesar mengikuti jumlah kavling, dikelilingi air, pohon, bunga, dan awan yang
+  bayangannya lewat. Di tema gelap suasananya malam: jendela dan lampu taman menyala, ada
+  kunang-kunang.
+- Kamera awalnya membidik kavling yang sedang bekerja; tombol **Semua** menampilkan seluruh pulau.
 
 Seret untuk memutar, scroll untuk zoom, klik kanan untuk menggeser. Arahkan kursor ke robot atau
 drone untuk melihat detail. Klik robot atau drone untuk membuka kartunya di kanban, dan klik papan
 nama project untuk mendekatkan kamera. Tombol **Putar**, **Label agent**, **Semua**, dan layar
 penuh ada di pojok kanan atas.
 
-**Klik 2x** robot, meja, atau papan nama project untuk membuka jendela terminal baru (Windows
+**Klik 2x** robot, meja, rumah, atau papan nama project untuk membuka jendela terminal baru (Windows
 Terminal, atau PowerShell kalau Windows Terminal tidak ada) di folder project itu, yang langsung
 menjalankan `claude --resume` untuk sesi terakhirnya. Sesi yang masih terbuka di terminal lain
 dilewati, karena satu sesi tidak bisa dipakai dua proses sekaligus, jadi yang dilanjutkan adalah

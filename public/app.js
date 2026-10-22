@@ -1163,7 +1163,7 @@ function officeHtml() {
   else if (!ov.active.length) overlay = `<div class="o3d-note" data-key="o3d-note">${icon('terminal', 'ic-sm')}<span>Belum ada sesi yang berjalan, jadi kantornya masih sepi. Jalankan <code>claude</code> di terminal atau kirim prompt, dan robotnya langsung duduk bekerja.</span></div>`;
   return `
   <header class="page-head">
-    <div><h1 class="page-title">Kantor 3D</h1><p class="page-sub">Tiap robot adalah sesi Claude Code, tiap drone ungu adalah agent yang sedang jalan. Robot yang menoleh ke kamu sedang menunggu balasanmu.</p></div>
+    <div><h1 class="page-title">Kantor 3D</h1><p class="page-sub">Tiap project punya kavling di pulau ini. Robot adalah sesi Claude Code, drone ungu adalah agent yang sedang jalan, dan rumah adalah project yang sedang sepi. Robot yang menoleh dan melambai sedang menunggu balasanmu.</p></div>
     <div class="head-right">${livePill()}<button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
   </header>
   <div class="o3d-wrap" data-key="o3d-wrap">
@@ -1178,7 +1178,7 @@ function officeHtml() {
       </div>
     </div>
     <div class="o3d-hud o3d-legend" data-key="o3d-legend">
-      <span><i class="sw tone-green"></i>Bekerja</span><span><i class="sw tone-amber"></i>Menunggu kamu</span><span><i class="sw tone-blue"></i>Memulai</span><span><i class="sw round tone-purple"></i>Agent</span><span><i class="sw tone-teal"></i>Background</span>
+      <span><i class="sw tone-green"></i>Bekerja</span><span><i class="sw tone-amber"></i>Menunggu kamu</span><span><i class="sw tone-blue"></i>Memulai</span><span><i class="sw round tone-purple"></i>Agent</span><span><i class="sw tone-teal"></i>Background</span><span><i class="sw tone-neutral"></i>Rumah: project sepi</span>
       <span class="o3d-hint">Seret untuk memutar · scroll untuk zoom · klik robot untuk detail · klik 2x untuk buka terminal + /resume</span>
     </div>
     ${overlay}
