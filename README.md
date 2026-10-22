@@ -1,3 +1,5 @@
+<img src="public/logo.svg" width="64" height="64" alt="">
+
 # Claude Kanban
 
 Dashboard lokal yang mendeteksi **semua sesi Claude Code dan agent-nya** di PC ini, lalu
@@ -159,8 +161,11 @@ dan body berupa JSON. Situs lain yang kamu buka di browser tidak bisa menyuruh C
 - **Toast + notifikasi desktop**: kabar saat Claude selesai dan *menunggu kamu*, atau saat
   agent selesai. Notifikasi desktop aktif lewat tombol 🔔 di sidebar, dan hanya muncul saat
   tab sedang tidak dibuka. Judul tab menampilkan jumlah sesi yang menunggu, misalnya `(1) Claude Kanban`.
-- **Tema**: ikut sistem, terang, atau gelap (tombol di sidebar). Bisa juga dipaksa lewat
-  URL `?theme=light` atau `?theme=dark`.
+- **Tema**: ikut sistem, terang, atau gelap (tombol di sidebar). "Ikut sistem" langsung berganti
+  saat tema Windows berubah. Bisa juga dipaksa lewat URL `?theme=light` atau `?theme=dark`.
+- **Terbaca**: teks keterangan dan teks berwarna status minimal 4,5:1 di kedua tema. Di HP,
+  sidebar menjadi bar atas yang ringkas, dan di layar sentuh tombol serta field lebih besar.
+  Warna dan ukuran diatur lewat design token, dijelaskan di [docs/design-tokens.md](docs/design-tokens.md).
 - **Update tanpa kedip**: DOM di-patch, bukan diganti, jadi scroll, fokus, dan panel yang
   terbuka tetap di tempatnya saat data berubah.
 - **Link langsung ke kartu**: `#/p/<project>/kanban/<id-kartu>`.

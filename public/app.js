@@ -535,11 +535,14 @@ function parseRoute() {
    ========================================================================== */
 // ?theme=light|dark forces a theme for this page load without touching the saved choice.
 const FORCED_THEME = (location.search.match(/[?&]theme=(light|dark)\b/) || [])[1];
+const DARK_QUERY = matchMedia('(prefers-color-scheme: dark)');
+// "auto" follows the system; the attribute always names the theme in use.
 function applyTheme() {
-  const t = FORCED_THEME || S.ui.theme;
-  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-  else delete document.documentElement.dataset.theme;
+  let t = FORCED_THEME || S.ui.theme;
+  if (t !== 'light' && t !== 'dark') t = DARK_QUERY.matches ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
 }
+DARK_QUERY.addEventListener('change', () => { if (!FORCED_THEME && S.ui.theme === 'auto') render(); });
 
 function measure() {
   const main = $('#main');
@@ -614,7 +617,7 @@ function sidebarHtml() {
   const themes = [['auto', 'monitor', 'Ikuti sistem'], ['light', 'sun', 'Terang'], ['dark', 'moon', 'Gelap']];
   return `
   <div class="sb-head">
-    <a class="brand" href="#/"><span class="brand-logo" aria-hidden="true"><i></i><i></i><i></i></span><span><b>Claude Kanban</b><small>Monitor Claude Code</small></span></a>
+    <a class="brand" href="#/"><img class="brand-logo" src="/logo.svg" alt="" width="34" height="34"><span><b>Claude Kanban</b><small>Monitor Claude Code</small></span></a>
   </div>
   <nav class="sb-nav">
     <a class="nav-item${S.route.view === 'overview' ? ' active' : ''}" href="#/">${icon('grid')}<span>Semua project</span>${waiting ? `<span class="nav-badge tone-amber" title="${waiting} sesi menunggu kamu">${waiting}</span>` : ''}</a>
@@ -1022,15 +1025,14 @@ function overviewHtml() {
   const ov = S.overview;
   if (!ov) return skeletonOverview();
   const k = ov.kpi;
-  const kpi = (ic, value, label, tone, hot) => `<div class="kpi tone-${tone}${hot ? ' hot' : ''}" data-key="kpi:${ic}"><span class="kpi-ic">${icon(ic, 'ic-lg')}</span><div class="kpi-text"><b>${value}</b><span>${label}</span></div></div>`;
+  const kpi = (ic, value, label, tone, hot) => `<div class="kpi tone-${tone}${hot ? ' hot' : ''}${value ? '' : ' zero'}" data-key="kpi:${ic}"><span class="kpi-ic">${icon(ic, 'ic-lg')}</span><div class="kpi-text"><b>${value}</b><span>${label}</span></div></div>`;
   const projects = ov.projects.slice().sort((a, b) => (b.working || b.waiting ? 1 : 0) - (a.working || a.waiting ? 1 : 0) || b.lastTs - a.lastTs);
+  // What needs you comes first: the counters, your limits, then the live sessions; token history after them.
   return `
   <header class="page-head">
     <div><h1 class="page-title">Semua project</h1><p class="page-sub">Apa yang sedang dikerjakan Claude Code dan agent-nya di PC ini, secara live.</p></div>
     <div class="head-right">${livePill()}<a class="btn" href="#/3d" title="Lihat sesi dan agent sebagai kantor 3D">${icon('cube', 'ic-sm')}Kantor 3D</a><button class="btn primary" data-act="compose" title="Tulis prompt (N)">${icon('message', 'ic-sm')}Prompt baru</button></div>
   </header>
-  ${usageHtml()}
-  ${tokensHtml(ov.tokens)}
   <section class="kpis">
     ${kpi('zap', k.working, 'Sesi bekerja', 'green')}
     ${kpi('user', k.waiting, 'Menunggu kamu', 'amber', k.waiting > 0)}
@@ -1038,11 +1040,13 @@ function overviewHtml() {
     ${kpi('checkc', k.todayDone, 'Task selesai hari ini', 'orange')}
     ${kpi('message', k.todayPrompts, 'Request hari ini', 'blue')}
   </section>
+  ${usageHtml()}
   <div class="ov-grid">
-    <div>
+    <div class="ov-main">
       <div class="section-head"><h2 class="section-title">Sedang berjalan</h2><span class="count-pill">${ov.active.length}</span></div>
       ${ov.active.length ? `<div class="now-grid">${ov.active.map((a) => nowCard(a)).join('')}</div>` : emptyState('terminal', 'Tidak ada sesi yang sedang berjalan', 'Jalankan <code>claude</code> di terminal mana pun, dan sesinya langsung muncul di sini.')}
-      <div class="section-head" style="margin-top:30px"><h2 class="section-title">Project</h2><span class="count-pill">${ov.projects.length}</span></div>
+      ${tokensHtml(ov.tokens)}
+      <div class="section-head"><h2 class="section-title">Project</h2><span class="count-pill">${ov.projects.length}</span></div>
       <div class="proj-grid">${projects.map(projCard).join('')}</div>
     </div>
     <aside class="feed">${feedHtml(ov.feed)}</aside>
@@ -1141,7 +1145,7 @@ function projCard(p) {
       ${prog && prog.total ? `<span>${ring(prog.pct, 18, 3)} ${prog.done}/${prog.total} task ${p.current ? 'saat ini' : '· 7 hari'}</span>` : '<span class="muted">Belum ada task</span>'}
       ${tokSum(p.tokens && p.tokens.all) ? `<span data-tip="${esc(tokTip(p.tokens.all, 'Token project') + '\nHari ini: ' + num(tokSum(p.tokens.today)))}">${icon('coins', 'ic-xs')} ${fmtTok(tokSum(p.tokens.all))}</span>` : ''}
       <span class="push">${icon('layers', 'ic-xs')} ${p.sessionCount} sesi</span>
-      ${p.runningAgents ? `<span style="color:var(--purple)">${icon('bot', 'ic-xs')} ${p.runningAgents}</span>` : ''}
+      ${p.runningAgents ? `<span style="color:var(--purple-ink)">${icon('bot', 'ic-xs')} ${p.runningAgents}</span>` : ''}
     </div>
   </a>`;
 }
@@ -1317,9 +1321,10 @@ function kanbanHtml() {
   return `<div class="toolbar">
       ${rangeSeg('range', ['24h', '7d', '30d', 'all'])}
       ${chips}
-      <span class="spacer"></span>
-      ${sessionSelect()}
-      <label class="field">${icon('search', 'ic-sm')}<input type="search" placeholder="Cari kartu…" value="${esc(S.ui.q)}" data-act="q" aria-label="Cari kartu"><kbd>/</kbd></label>
+      <div class="toolbar-end">
+        ${sessionSelect()}
+        <label class="field">${icon('search', 'ic-sm')}<input type="search" placeholder="Cari kartu…" value="${esc(S.ui.q)}" data-act="q" aria-label="Cari kartu"><kbd>/</kbd></label>
+      </div>
     </div>
     <div class="board">${cols}</div>`;
 }
@@ -1378,7 +1383,7 @@ function cardHtml(c) {
     if (tokSum(c.tokens)) bits.push(`<span data-tip="${esc(tokTip(c.tokens, c.agentCount ? 'Token request ini (termasuk agent)' : 'Token request ini'))}">${icon('coins', 'ic-xs')}${fmtTok(tokSum(c.tokens))}</span>`);
     if (c.source === 'queued') bits.push(`${icon('clock', 'ic-xs')}diketik saat Claude bekerja`);
     if (c.source === 'board') bits.push(`${icon('play', 'ic-xs')}dari kanban`);
-    if (c.needs) bits.push(`<span style="color:var(--amber)">${icon('alert', 'ic-xs')}${esc(needsLabel(c.needs))}</span>`);
+    if (c.needs) bits.push(`<span style="color:var(--amber-ink)">${icon('alert', 'ic-xs')}${esc(needsLabel(c.needs))}</span>`);
     if (bits.length) body += `<div class="card-bits">${bits.map((b) => `<span>${b}</span>`).join('')}</div>`;
   } else if (c.kind === 'task' && c.status === 'in_progress' && !c.stale) {
     body += `<div class="card-act tone-green">${icon('loader', 'ic-xs spin')}<span>${esc(c.activeForm || 'Sedang dikerjakan')}</span></div>`;
@@ -1392,7 +1397,7 @@ function cardHtml(c) {
     body += `<div class="card-act">${icon('clock', 'ic-xs')}<span>Dikirim otomatis setelah giliran sekarang selesai</span></div>`;
   } else if (c.kind === 'run') {
     if (c.column === 'doing') body += `<div class="card-act tone-green">${icon('loader', 'ic-xs spin')}<span>${c.fork ? 'Membuat cabang sesi…' : c.target ? 'Melanjutkan sesi…' : 'Memulai sesi baru…'}</span></div>`;
-    else if (c.error) body += `<div class="card-snippet" style="color:var(--red)">${esc(trim(c.error, 220))}</div>`;
+    else if (c.error) body += `<div class="card-snippet" style="color:var(--red-ink)">${esc(trim(c.error, 220))}</div>`;
   }
   return `<article class="card${live ? ' is-live' : ''}${c.stale ? ' is-stale' : ''}" data-key="${esc(c.id)}" data-card="${esc(c.id)}" tabindex="0">
     <div class="card-top"><span class="kind tone-${K.tone}">${icon(K.icon, 'ic-xs')}${K.label}</span>${right ? `<span class="card-right">${right}</span>` : ''}</div>
@@ -1416,9 +1421,10 @@ function timelineHtml() {
       ${rangeSeg('tlRange', ['6h', '24h', '7d', '30d'])}
       <button class="chip tone-purple${S.ui.tlAgents ? ' on' : ''}" data-act="tlAgents" aria-pressed="${S.ui.tlAgents}">${icon('bot', 'ic-xs')}Agent</button>
       <button class="chip tone-orange${S.ui.tlTasks ? ' on' : ''}" data-act="tlTasks" aria-pressed="${S.ui.tlTasks}">${icon('checksq', 'ic-xs')}Task</button>
-      <span class="spacer"></span>
-      <button class="btn sm" data-act="tl-all">${icon(S.ui.tlCollapsed.length ? 'chevD' : 'chevR', 'ic-xs')}${S.ui.tlCollapsed.length ? 'Bentangkan semua' : 'Ciutkan semua'}</button>
-      ${sessionSelect()}
+      <div class="toolbar-end">
+        <button class="btn sm" data-act="tl-all">${icon(S.ui.tlCollapsed.length ? 'chevD' : 'chevR', 'ic-xs')}${S.ui.tlCollapsed.length ? 'Bentangkan semua' : 'Ciutkan semua'}</button>
+        ${sessionSelect()}
+      </div>
     </div>
     <div class="tl-card">
       <div class="tl-scroll"><div class="tl" data-key="tl">${timelineSvg()}</div></div>
