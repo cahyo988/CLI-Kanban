@@ -584,6 +584,8 @@ kbd {
 .ph { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: center; margin-bottom: 20px; }
 .ph-path { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--text-3); font-size: 12.5px; min-width: 0; }
 .ph-path .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-acct { margin-top: 8px; max-width: 100%; }
+.ph-acct select { max-width: min(360px, 100%); }
 .ph-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .stat {
   display: flex; align-items: center; gap: 11px; padding: 10px 14px; min-width: 120px;

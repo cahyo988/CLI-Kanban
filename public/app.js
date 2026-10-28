@@ -773,6 +773,20 @@ const profileOf = (id) => profiles().find((p) => p.id === (id || 'default')) || 
 const activeProfile = () => profiles().find((p) => p.active) || null;
 const loggedIn = (p) => !!(p && p.account && p.account.data && p.account.data.loggedIn);
 const loggedOut = (p) => !!(p && p.account && p.account.data && !p.account.data.loggedIn);
+// A project's own account, if it has one; otherwise its new sessions follow the active account.
+const pinnedProfile = (key) => { const id = S.overview && S.overview.projectAccounts && S.overview.projectAccounts[key]; return id && profileOf(id) ? id : null; };
+const projectProfile = (key) => pinnedProfile(key) || (activeProfile() || {}).id || 'default';
+function projectAccountPicker(key) {
+  const list = profiles();
+  if (list.length < 2) return '';
+  const pinned = pinnedProfile(key);
+  const act = activeProfile();
+  const label = (p) => `${p.name}${loggedIn(p) && p.account.data.email ? ' · ' + p.account.data.email : loggedOut(p) ? ' · belum login' : ''}`;
+  return `<label class="field ph-acct" data-tip="${esc('Akun untuk sesi baru project ini\nDipakai prompt baru dari kanban dan terminal (klik 2x di Kantor 3D).\nSesi yang sudah ada tetap memakai akunnya sendiri.')}">${icon('user', 'ic-sm')}<select data-act="proj-profile" data-project="${esc(key)}" aria-label="Akun project ini">
+    <option value=""${pinned ? '' : ' selected'}>Ikuti akun aktif${act ? ' (' + esc(act.name) + ')' : ''}</option>
+    ${list.map((p) => `<option value="${esc(p.id)}"${p.id === pinned ? ' selected' : ''}>${esc(label(p))}</option>`).join('')}
+  </select>${icon('chevD', 'ic-sm after')}</label>`;
+}
 // Shown only when there is more than one account to tell apart.
 function profTag(id) {
   if (profiles().length < 2) return '';
@@ -892,7 +906,7 @@ function renderAccounts() {
       <div class="cmp-body">
         <div class="acc-list">${list.map(accountCard).join('')}</div>
         ${S.accounts.form ? accountForm() : `<button class="btn acc-add" data-key="acc-add" data-act="acc-add">${icon('plus', 'ic-sm')}Tambah akun</button>`}
-        <p class="cmp-hint acc-note">${icon('swap', 'ic-xs')}<span>Akun <b>aktif</b> dipakai untuk prompt baru dari kanban, dan limitnya tampil di sidebar. Lanjutan sesi selalu memakai akun sesi itu. Terminal tetap memakai akun utama, kecuali kamu membukanya dengan <i>Salin perintah terminal</i>.</span></p>
+        <p class="cmp-hint acc-note">${icon('swap', 'ic-xs')}<span>Akun <b>aktif</b> dipakai untuk sesi baru, dan limitnya tampil di sidebar. Tiap project bisa punya akunnya sendiri: pilih di halaman project, di bawah path-nya. Lanjutan sesi selalu memakai akun sesi itu.</span></p>
       </div>
     </section>`);
   if (!modal.classList.contains('open')) { modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false'); }
@@ -922,6 +936,17 @@ async function sendLoginCode(id) {
   const r = await api('/api/profiles/login-input', { id, text: code });
   if (r.ok && S.accounts) S.accounts.codes[id] = '';
   if (!r.ok) toast({ tone: 'red', icon: 'alert', title: 'Kode tidak terkirim', body: r.error });
+  scheduleReload();
+}
+
+async function setProjectProfile(key, id) {
+  const r = await api('/api/profiles/project', { projectKey: key, id: id || null });
+  const p = id ? profileOf(id) : activeProfile();
+  const proj = S.overview && S.overview.projects.find((x) => x.key === key);
+  toast(r.ok
+    ? { tone: 'green', icon: 'user', title: `${proj ? proj.name : 'Project'} · ${id ? 'akun ' + (p ? p.name : id) : 'ikuti akun aktif'}`, body: 'Sesi baru project ini memakai akun tersebut. Sesi yang sudah ada tetap memakai akunnya sendiri.', ttl: 5000 }
+    : { tone: 'red', icon: 'alert', title: 'Akun project gagal diganti', body: r.error });
+  if (r.ok && S.overview) { S.overview.projectAccounts = { ...(S.overview.projectAccounts || {}) }; if (id) S.overview.projectAccounts[key] = id; else delete S.overview.projectAccounts[key]; render(); }
   scheduleReload();
 }
 
@@ -1136,7 +1161,7 @@ function projCard(p) {
   return `<a class="proj-card" data-key="pc:${esc(p.key)}" href="${projectHref(p.key)}">
     <div class="pc-top">
       <span class="avatar" style="--pc:${hashColor(p.key)}">${esc(initials(p.name))}</span>
-      <div class="pc-titles"><div class="pc-name">${esc(p.name)}</div><div class="pc-path">${esc(shortPath(p.path, 46))}</div></div>
+      <div class="pc-titles"><div class="pc-name">${esc(p.name)}${pinnedProfile(p.key) ? profTag(pinnedProfile(p.key)) : ''}</div><div class="pc-path">${esc(shortPath(p.path, 46))}</div></div>
       ${right}
     </div>
     ${p.headline ? `<div class="pc-headline">${esc(p.headline)}</div>` : ''}
@@ -1253,6 +1278,7 @@ function projectPageHtml() {
     <div style="min-width:0">
       <h1 class="page-title">${esc(s.name)} ${pill(st, st === 'working' && s.working > 1 ? `${s.working} sesi bekerja` : null)}</h1>
       <div class="ph-path"><span class="mono" title="${esc(s.path)}">${esc(s.path)}</span><button class="btn ghost sm icon-btn" data-act="copy" data-v="${esc(s.path)}" title="Salin path" aria-label="Salin path">${icon('copy', 'ic-xs')}</button></div>
+      ${projectAccountPicker(s.key)}
     </div>
     <div class="ph-stats">
       ${prog.total
@@ -1614,7 +1640,7 @@ function routeInfo(c) {
   const p = S.overview && S.overview.projects.find((x) => x.key === c.projectKey);
   const sess = c.sessionId ? composerSessions(c.projectKey).find((x) => x.id === c.sessionId) : null;
   if (!sess) {
-    const prof = profiles().length > 1 ? profileOf(c.profileId || (activeProfile() || {}).id) : null;
+    const prof = profiles().length > 1 ? profileOf(c.profileId || projectProfile(c.projectKey)) : null;
     return { tone: 'blue', icon: 'play', fork: false, text: `Membuka sesi baru di <code>${esc(p ? p.path : '?')}</code>${prof ? ` dengan akun <b>${esc(prof.name)}</b>` : ''}. Berjalan di background, progress-nya muncul di kanban ini.` };
   }
   if (c.forceFork || (sess.liveKind && !sess.managed)) {
@@ -1708,8 +1734,9 @@ function composerAccount(c, sessions) {
     const p = profileOf(sess.profile);
     return `<div class="cmp-row"><div class="cmp-field"><span>Akun</span><span class="field static">${icon('user', 'ic-sm')}<span>${esc(p ? p.name : 'Utama')}${p && loggedIn(p) && p.account.data.email ? ` · ${esc(p.account.data.email)}` : ''}</span><span class="muted">akun sesi ini</span></span></div></div>`;
   }
-  const chosen = c.profileId || (activeProfile() || {}).id;
-  const label = (p) => `${p.name} — ${loggedIn(p) ? p.account.data.email || 'login' : loggedOut(p) ? 'belum login' : 'memeriksa…'}${p.active ? ' (aktif)' : ''}`;
+  const chosen = c.profileId || projectProfile(c.projectKey);
+  const pinned = pinnedProfile(c.projectKey);
+  const label = (p) => `${p.name} — ${loggedIn(p) ? p.account.data.email || 'login' : loggedOut(p) ? 'belum login' : 'memeriksa…'}${p.id === pinned ? ' (akun project)' : p.active && !pinned ? ' (aktif)' : ''}`;
   return `<div class="cmp-row"><label class="cmp-field"><span>Akun</span>
     <span class="field">${icon('user', 'ic-sm')}<select data-act="cmp-profile">${list.map((p) => `<option value="${esc(p.id)}"${p.id === chosen ? ' selected' : ''}${loggedOut(p) ? ' disabled' : ''}>${esc(label(p))}</option>`).join('')}</select>${icon('chevD', 'ic-sm after')}</span>
   </label></div>`;
@@ -1725,7 +1752,7 @@ async function sendComposer() {
   const res = await api('/api/prompt', {
     projectKey: c.projectKey, sessionId: c.sessionId || null, fork: info.fork,
     prompt: c.text.trim(), permissionMode: S.ui.cmpMode, model: S.ui.cmpModel,
-    profileId: c.sessionId ? null : c.profileId || (activeProfile() || {}).id || null,
+    profileId: c.sessionId ? null : c.profileId || projectProfile(c.projectKey),
   });
   if (S.composer !== c) return;
   if (!res.ok) {
@@ -2055,7 +2082,8 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   const act = e.target.dataset && e.target.dataset.act;
   if (act === 'session') { S.ui.session = e.target.value; render(); }
-  else if (act === 'cmp-project' && S.composer) { S.composer.projectKey = e.target.value; S.composer.sessionId = ''; S.composer.forceFork = false; S.composer.error = null; renderComposer(); }
+  else if (act === 'cmp-project' && S.composer) { S.composer.projectKey = e.target.value; S.composer.sessionId = ''; S.composer.forceFork = false; S.composer.error = null; S.composer.profileId = null; renderComposer(); }
+  else if (act === 'proj-profile') setProjectProfile(e.target.dataset.project, e.target.value);
   else if (act === 'cmp-session' && S.composer) { S.composer.sessionId = e.target.value; S.composer.forceFork = false; S.composer.error = null; renderComposer(); }
   else if (act === 'cmp-model') { S.ui.cmpModel = e.target.value; saveUi(); }
   else if (act === 'cmp-profile' && S.composer) { S.composer.profileId = e.target.value; S.composer.error = null; renderComposer(); }

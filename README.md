@@ -102,6 +102,10 @@ bersamaan dan tidak saling menimpa:
 
 - **Akun aktif** dipakai untuk prompt baru dari kanban, dan limitnya tampil di sidebar. Di
   composer kamu juga bisa memilih akun lain untuk satu prompt.
+- **Akun per project**: di halaman project, di bawah path-nya, pilih akun untuk project itu, atau
+  "Ikuti akun aktif". Bisa diganti kapan saja. Akun ini dipakai sesi baru project tersebut, baik
+  dari composer (otomatis terpilih) maupun terminal lewat klik 2x di Kantor 3D. Kartu project di
+  halaman utama diberi tag nama akunnya.
 - **Lanjutan sesi** selalu memakai akun pemilik sesi itu, karena transcript-nya ada di folder
   akun tersebut. Untuk pindah akun, mulai sesi baru.
 - Panel pemakaian menampilkan limit **setiap akun** berdampingan. Akun aktif diperbarui tiap 90
@@ -111,8 +115,8 @@ bersamaan dan tidak saling menimpa:
 - Kalau login meminta kode dari browser, tempel kodenya di kartu akun. Output CLI juga bisa
   dilihat di sana.
 - **Hapus** hanya melepas akun dari kanban. Folder, login, dan riwayatnya tetap ada di disk.
-- Mengganti akun aktif di kanban tidak mengubah terminal. `claude` di terminal tetap memakai
-  akun utama, kecuali dibuka dengan perintah akun lain.
+- Mengganti akun di kanban tidak mengubah terminal yang kamu buka sendiri. `claude` di sana tetap
+  memakai akun utama, kecuali dibuka dengan perintah akun lain.
 
 Data akun diambil dari `claude auth status --json` milik tiap folder, jadi kanban tidak membaca
 file kredensial. Daftar akun disimpan di `data/profiles.json`.

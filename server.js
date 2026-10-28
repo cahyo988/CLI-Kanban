@@ -159,7 +159,7 @@ async function handlePrompt(req, res) {
   const cwd = projectPath(snap, key);
   if (!cwd) return sendJson(res, 404, { error: 'Project tidak ditemukan.' });
   if (!isDir(cwd)) return sendJson(res, 400, { error: `Folder project tidak ditemukan: ${cwd}` });
-  const profileId = wantProfile || profiles.active;
+  const profileId = wantProfile || profiles.forProject(key);
   const problem = profiles.problem(profileId);
   if (problem) return sendJson(res, 400, { error: problem });
   const out = runner.submit({ cwd, projectKey: key, prompt, target: null, fork: false, permissionMode, model, profileId });
@@ -197,7 +197,7 @@ async function handleTerminal(req, res) {
   }
   const cwd = projectPath(snap, key);
   if (!cwd || !isDir(cwd)) return sendJson(res, 400, { error: `Folder project tidak ditemukan: ${cwd || '?'}` });
-  const prof = profiles.get(profiles.active);
+  const prof = profiles.get(profiles.forProject(key));
   const via = openTerminal({ cwd, configDir: prof && !prof.isDefault ? prof.dir : null, title: `Claude · ${name}`, banner: 'Sesi baru: belum ada sesi project ini yang bisa dilanjutkan.' });
   return sendJson(res, 200, { ok: true, mode: 'new', skipped, via });
 }
@@ -216,6 +216,9 @@ async function handleProfiles(action, req, res) {
       return sendJson(res, 200, { ok: true });
     case 'active':
       profiles.setActive(id);
+      return sendJson(res, 200, { ok: true });
+    case 'project':
+      profiles.setProject(body.projectKey, id || null);
       return sendJson(res, 200, { ok: true });
     case 'login':
       profiles.login(id);
@@ -258,7 +261,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/overview') {
       profiles.ensureFresh();
       const act = profiles.activeState();
-      return sendJson(res, 200, overview(snapshot(), { usage: act.usage.snapshot(), account: act.account.snapshot(), profiles: profiles.snapshot(), home: os.homedir() }));
+      return sendJson(res, 200, overview(snapshot(), { usage: act.usage.snapshot(), account: act.account.snapshot(), profiles: profiles.snapshot(), projectAccounts: { ...profiles.projects }, home: os.homedir() }));
     }
     if (url.pathname === '/api/project') {
       const detail = projectDetail(snapshot(), url.searchParams.get('key') || '');
